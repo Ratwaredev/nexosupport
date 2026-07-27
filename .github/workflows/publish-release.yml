@@ -1,16 +1,19 @@
 name: Publish NEXO Support release
 
 on:
-  workflow_dispatch:
   push:
-    branches: [main, agent/nexo-support-rebrand]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: nexo-production-release
+  cancel-in-progress: false
 
 permissions:
   contents: write
 
 jobs:
   publish:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,6 +30,13 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
+      - name: Set unique release version
+        shell: pwsh
+        run: |
+          $version = "0.3.${{ github.run_number }}"
+          node scripts/set-release-version.mjs $version
+          "NEXO_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Install dependencies
         run: npm ci
 
@@ -34,17 +44,22 @@ jobs:
         shell: pwsh
         run: ./scripts/prepare-sensors.ps1
 
+      - name: Validate frontend
+        run: npm run build
+
+      - name: Validate Tauri backend
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
       - name: Verify updater signing key
         shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
-            throw 'Missing repository secret TAURI_SIGNING_PRIVATE_KEY. The updater cannot publish unsigned releases.'
+            throw 'Missing TAURI_SIGNING_PRIVATE_KEY.'
           }
 
       - name: Build and publish GitHub Release
-        id: publish_release
         uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -62,37 +77,14 @@ jobs:
           tagName: v__VERSION__
           releaseName: NEXO Support v__VERSION__
           releaseBody: |
-            Actualización de NEXO Support.
+            Actualización automática desde main.
 
-            - Corrige el primer inicio del popup.
-            - Separa los estilos del asistente y NEXO Control.
-            - Agrega actualizaciones desde la propia aplicación.
-            - Mantiene diagnósticos, sensores y permisos del usuario.
+            - Interfaz inicial simplificada.
+            - Inicio inmediato del diagnóstico.
+            - Mejoras generales de NEXO Support.
           releaseDraft: false
           prerelease: false
           updaterJsonPreferNsis: true
           uploadUpdaterJson: true
           uploadUpdaterSignatures: true
           retryAttempts: 2
-
-      - name: Record release result
-        if: always()
-        shell: pwsh
-        env:
-          RELEASE_URL: ${{ steps.publish_release.outputs.releaseHtmlUrl }}
-        run: |
-          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $result = [ordered]@{
-            version = $version
-            status = '${{ job.status }}'
-            runId = '${{ github.run_id }}'
-            commit = '${{ github.sha }}'
-            releaseUrl = $env:RELEASE_URL
-            recordedAt = (Get-Date).ToUniversalTime().ToString('o')
-          } | ConvertTo-Json
-          Set-Content -Path .release-result.json -Value $result -Encoding utf8
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .release-result.json
-          git commit -m "chore: record NEXO release $version ${{ job.status }}" || exit 0
-          git push origin "HEAD:${{ github.ref_name }}"
