@@ -1,86 +1,93 @@
 # NEXO Support
 
-Asistente técnico de escritorio para Windows construido con Tauri, React y TypeScript.
-
-No es un dashboard tradicional. La aplicación abre un popup compacto de chat y, al cerrarlo, sigue disponible desde la bandeja del sistema.
+NEXO Support es un asistente de escritorio para Windows que vive en la bandeja del sistema. El usuario abre un popup compacto, explica el problema y autoriza de forma explícita qué puede leer o modificar.
 
 ## Producto
 
-El usuario no configura modelos, API keys ni herramientas. Solo activa la PC con un código entregado por NEXO y escribe lo que le pasa.
+La aplicación tiene dos superficies separadas:
 
-NEXO puede:
+- **NEXO Support:** popup para el usuario final, con estado del equipo, chat, diagnóstico y soporte remoto.
+- **NEXO Control:** panel administrativo para gestionar usuarios, equipos, planes, modelos, consumo y solicitudes.
 
-- revisar memoria, disco, inicio, seguridad, reinicios pendientes y temperatura;
-- comprobar conexión, DNS y adaptadores de red;
-- buscar archivos temporales sin borrarlos;
-- revisar programas de inicio sin desactivarlos;
-- ejecutar limpiezas limitadas y reparaciones seguras después de una confirmación visible;
-- iniciar un análisis rápido oficial de Microsoft Defender;
-- abrir Windows Update bajo control del usuario;
-- crear una solicitud y abrir soporte remoto cuando hace falta;
-- realizar una revisión liviana cada cuatro horas mientras la app está ejecutándose y avisar solo si encuentra algo relevante.
+Las sesiones son independientes. Una persona del equipo NEXO puede usar su propio asistente como usuario normal y abrir el panel administrativo sin cerrar ni reemplazar la sesión de su PC.
 
-## Reglas de seguridad
+## Privacidad y permisos
 
-La IA nunca ejecuta comandos arbitrarios. OpenRouter solo puede solicitar herramientas incluidas en una lista cerrada. La app vuelve a validar el nombre de la herramienta localmente.
+En la primera activación el usuario decide si permite:
 
-- Lecturas: pueden ejecutarse automáticamente.
-- Cambios: requieren el botón **Sí, hacelo**.
-- Acceso remoto: requiere una solicitud explícita del usuario.
-- Prohibido: limpieza de registro, desactivar antivirus, borrar carpetas del sistema, tocar drivers a ciegas o ejecutar scripts generados por el modelo.
+- usar el asistente conectado al servidor de NEXO;
+- leer memoria, disco y sensores de hardware;
+- compartir un resumen técnico con NEXO y el modelo asignado;
+- ejecutar revisiones automáticas mientras la aplicación está activa.
 
-## OpenRouter y planes
+La lectura local de sensores no se comparte si el usuario no habilita **Compartir diagnóstico con NEXO**. Las acciones que cambian Windows requieren una confirmación adicional y visible.
 
-La clave de OpenRouter no se incluye en el ejecutable.
+## Sensores de hardware
 
-1. La app envía la conversación al endpoint privado de NEXO: `VITE_NEXO_API_URL/api/assistant`.
-2. El servidor valida el `device_token` contra Supabase.
-3. `public.device_entitlements` determina si el asistente está activo, el plan, el límite mensual y el modelo.
-4. El servidor llama a OpenRouter con tool calling y devuelve como máximo una herramienta por turno.
-5. La herramienta se ejecuta en la PC únicamente si está autorizada por el catálogo local.
+La aplicación usa `LibreHardwareMonitorLib` 0.9.6 para leer los sensores que el firmware, la placa y los controladores exponen a Windows:
 
-El modelo puede definirse por plan mediante `NEXO_MODEL_BASIC`, `NEXO_MODEL_PRO`, etc., o por dispositivo con `device_entitlements.model`.
+- temperatura y carga de CPU;
+- temperatura y carga de GPU;
+- temperatura de discos;
+- ventiladores y otros sensores compatibles.
+
+No se presenta una zona ACPI genérica como si fuera la temperatura exacta del procesador. Si el sensor necesita privilegios elevados, el usuario puede iniciar una lectura avanzada y Windows muestra su diálogo de autorización.
+
+El componente se descarga desde el paquete oficial de NuGet durante la preparación del build y se distribuye con su licencia MPL-2.0.
+
+## IA y planes
+
+La clave de OpenRouter nunca se guarda en el ejecutable. El desktop llama a `api/assistant.ts`, que:
+
+1. valida el dispositivo;
+2. verifica el consentimiento y el plan;
+3. aplica el límite mensual;
+4. selecciona el modelo asignado al usuario o equipo;
+5. filtra las herramientas permitidas antes de llamar a OpenRouter.
+
+NEXO Control permite cambiar el plan, el modelo y el límite de cada usuario o equipo sin pedirle configuración al cliente.
+
+## Herramientas
+
+### Solo lectura
+
+- diagnóstico general;
+- sensores de hardware;
+- conexión y DNS;
+- archivos temporales;
+- programas de inicio;
+- estado de Microsoft Defender.
+
+### Con confirmación
+
+- limpiar temporales antiguos;
+- limpiar caché DNS;
+- iniciar un análisis rápido de Defender;
+- abrir Windows Update;
+- preparar soporte remoto.
+
+No existe una herramienta de comandos arbitrarios.
 
 ## Configuración
 
-### Supabase
-
 1. Ejecutar `infra/supabase/schema.sql`.
 2. Ejecutar `infra/supabase/nexo-assistant.sql`.
-3. Generar un código de vinculación desde el sistema de NEXO.
-4. Activar el entitlement del dispositivo y asignar plan/modelo.
-
-### Desktop
-
-Copiar `.env.example` como `.env` y completar Supabase y `VITE_NEXO_API_URL`.
-
-### Servidor
-
-Desplegar `api/assistant.ts` en Vercel o un runtime Edge compatible y configurar las variables de `.env.server.example`.
-
-Nunca colocar `OPENROUTER_API_KEY` ni `SUPABASE_SERVICE_ROLE_KEY` en variables `VITE_*`.
-
-## Comportamiento de ventana
-
-- Tamaño base: 410 × 640 px.
-- Sin barra nativa ni icono en la taskbar.
-- Abre como popup compacto al ejecutar para que el primer uso sea obvio.
-- Clic izquierdo en el icono de bandeja: mostrar/ocultar popup.
-- La X oculta la ventana, no termina el agente.
-- **Cerrar NEXO** desde el menú sí termina el proceso.
+3. Copiar `.env.example` y `.env.server.example`.
+4. Configurar Supabase y las variables server-only de OpenRouter.
+5. Crear usuarios desde NEXO Control y generar un código de activación para cada uno.
 
 ## Desarrollo
 
-```bash
+```powershell
 npm install
+npm run prepare:sensors
 npm run tauri:dev
 ```
 
 ## Build
 
-```bash
-npm run build
+```powershell
 npm run tauri:build
 ```
 
-El updater conserva el identificador y el feed de releases existentes para no cortar instalaciones previas.
+GitHub Actions valida TypeScript y Rust en Windows y genera un instalador NSIS sin firma como artefacto de prueba. Las releases públicas deben construirse con la clave privada real del updater y publicar el instalador, su firma y `latest.json`.
