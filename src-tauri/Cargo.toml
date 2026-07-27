@@ -1,5 +1,5 @@
 [package]
-name = "nexo-support"
+name = "underdock"
 version = "0.1.7"
 description = "NEXO Support desktop assistance app"
 authors = ["Ratwaredev"]
