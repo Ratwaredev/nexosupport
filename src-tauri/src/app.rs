@@ -3,6 +3,10 @@ use chrono::Utc;
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, process::Command};
+use tauri::{
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager, PhysicalPosition, WindowEvent,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,13 +64,55 @@ struct AgentActionResult {
 }
 
 #[tauri::command]
+fn hide_main_window(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.hide().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn minimize_main_window(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.minimize().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn exit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+fn position_popup(window: &tauri::WebviewWindow) {
+    let Ok(Some(monitor)) = window.primary_monitor() else {
+        return;
+    };
+    let Ok(size) = window.outer_size() else {
+        return;
+    };
+    let monitor_size = monitor.size();
+    let origin = monitor.position();
+    let x = origin.x + monitor_size.width as i32 - size.width as i32 - 18;
+    let y = origin.y + monitor_size.height as i32 - size.height as i32 - 66;
+    let _ = window.set_position(PhysicalPosition::new(x.max(origin.x), y.max(origin.y)));
+}
+
+fn toggle_popup(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if window.is_visible().unwrap_or(false) {
+        let _ = window.hide();
+        return;
+    }
+    position_popup(&window);
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+#[tauri::command]
 fn run_quick_diagnostic() -> Result<DiagnosticReport, String> {
     #[cfg(target_os = "windows")]
     {
         let raw = run_windows_diagnostic()?;
         let mut report: DiagnosticReport = serde_json::from_str(&raw)
-            .map_err(|err| format!("No se pudo interpretar el diagnóstico: {err}. Salida: {raw}"))?;
-
+            .map_err(|error| format!("No se pudo interpretar el diagnóstico: {error}."))?;
         report.recommendations = build_recommendations(&report);
         Ok(report)
     }
@@ -89,7 +135,7 @@ fn run_quick_diagnostic() -> Result<DiagnosticReport, String> {
             max_temperature_c: None,
             temperature_note: "No disponible fuera de Windows.".to_string(),
             thermal_zones: vec![],
-            recommendations: vec!["Este MVP prioriza Windows. Preparar comandos por sistema operativo antes de liberar soporte multiplataforma.".to_string()],
+            recommendations: vec!["NEXO Support prioriza Windows en esta versión.".to_string()],
         })
     }
 }
@@ -99,22 +145,11 @@ fn thermal_status() -> Result<AgentActionResult, String> {
     #[cfg(target_os = "windows")]
     {
         let raw = run_windows_thermal_status()?;
-        Ok(AgentActionResult {
-            action: "thermal_status".to_string(),
-            ok: true,
-            message: "Temperatura ACPI leida.".to_string(),
-            details: vec![raw],
-        })
+        Ok(action_ok("thermal_status", "Temperatura revisada.", vec![raw]))
     }
-
     #[cfg(not(target_os = "windows"))]
     {
-        Ok(AgentActionResult {
-            action: "thermal_status".to_string(),
-            ok: true,
-            message: "Temperatura ACPI no aplica fuera de Windows.".to_string(),
-            details: vec![],
-        })
+        Ok(action_ok("thermal_status", "La temperatura ACPI no está disponible en este sistema.", vec![]))
     }
 }
 
@@ -126,21 +161,20 @@ fn create_remote_session() -> Result<RemoteSession, String> {
         .map(char::from)
         .collect::<String>()
         .to_uppercase();
-
     Ok(RemoteSession {
         code,
         expires_in_minutes: 20,
-        instructions: "Compartí este código con el técnico. Próximo paso: asociarlo al ticket y abrir RustDesk/MeshCentral.".to_string(),
+        instructions: "La conexión remota solo se abre con autorización visible del usuario.".to_string(),
     })
 }
 
 #[tauri::command]
 fn agent_status() -> Result<AgentStatus, String> {
     Ok(AgentStatus {
-        mode: "on-demand".to_string(),
-        monitoring: false,
+        mode: "tray-on-demand".to_string(),
+        monitoring: true,
         version: env!("CARGO_PKG_VERSION").to_string(),
-        notes: "El agent se ejecuta solo cuando el usuario pide diagnóstico, soporte o mantenimiento. No queda monitoreando la PC.".to_string(),
+        notes: "NEXO realiza revisiones livianas y solo ejecuta cambios después de una confirmación visible.".to_string(),
     })
 }
 
@@ -151,11 +185,15 @@ fn run_agent_action(action_id: String) -> Result<AgentActionResult, String> {
         "startup_review" => startup_review(),
         "windows_update" => open_windows_update(),
         "defender_status" => defender_status(),
+        "defender_quick_scan" => defender_quick_scan(),
         "thermal_status" => thermal_status(),
+        "network_check" => network_check(),
+        "repair_network" => repair_network(),
+        "clean_temp_files" => clean_temp_files(),
         other => Ok(AgentActionResult {
             action: other.to_string(),
             ok: false,
-            message: "Acción no reconocida.".to_string(),
+            message: "Esa acción no está autorizada por NEXO.".to_string(),
             details: vec!["No se ejecutó ningún comando.".to_string()],
         }),
     }
@@ -172,22 +210,24 @@ fn open_remote_tool() -> Result<String, String> {
                 .arg("")
                 .arg(path.as_os_str())
                 .spawn()
-                .map_err(|err| format!("No se pudo abrir RustDesk: {err}"))?;
-            return Ok(format!("RustDesk abierto: {}", path.to_string_lossy()));
+                .map_err(|error| format!("No se pudo abrir la asistencia remota: {error}"))?;
+            return Ok("Asistencia remota abierta. El usuario mantiene el control.".to_string());
         }
-
-        Ok("No encontré RustDesk. Poné rustdesk.exe en tools/rustdesk/rustdesk.exe o instalalo en Program Files. UnderDock sigue funcionando como ticket/diagnóstico.".to_string())
+        Ok("No encontré la herramienta remota instalada. El pedido técnico quedó creado.".to_string())
     }
-
     #[cfg(not(target_os = "windows"))]
     {
-        Ok("La integración remota del MVP busca RustDesk en Windows. En otros sistemas hay que configurar el binario equivalente.".to_string())
+        Ok("La conexión remota de esta versión está preparada para Windows.".to_string())
     }
+}
+
+fn action_ok(action: &str, message: &str, details: Vec<String>) -> AgentActionResult {
+    AgentActionResult { action: action.to_string(), ok: true, message: message.to_string(), details }
 }
 
 #[cfg(target_os = "windows")]
 fn run_windows_diagnostic() -> Result<String, String> {
-    let script = r#"
+    run_powershell(r#"
 $ErrorActionPreference = 'SilentlyContinue'
 $os = Get-CimInstance Win32_OperatingSystem
 $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
@@ -197,32 +237,15 @@ $defender = Get-MpComputerStatus
 $pending = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
 $defenderStatus = if ($defender.AMServiceEnabled -eq $true) { 'Activo' } elseif ($null -eq $defender) { 'No detectado' } else { 'Revisar' }
 $thermalZones = @()
-
 try {
   $thermalZones = Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature | ForEach-Object {
-    $tempC = $null
-    if ($null -ne $_.CurrentTemperature) {
-      $tempC = [Math]::Round(($_.CurrentTemperature / 10) - 273.15, 1)
-    }
-
-    [PSCustomObject]@{
-      name = $_.InstanceName
-      temperatureC = $tempC
-      source = 'root\wmi:MSAcpi_ThermalZoneTemperature'
-    }
+    $tempC = if ($null -ne $_.CurrentTemperature) { [Math]::Round(($_.CurrentTemperature / 10) - 273.15, 1) } else { $null }
+    [PSCustomObject]@{ name = $_.InstanceName; temperatureC = $tempC; source = 'root\wmi:MSAcpi_ThermalZoneTemperature' }
   }
-} catch {
-  $thermalZones = @()
-}
-
+} catch { $thermalZones = @() }
 $validTemps = $thermalZones | Where-Object { $null -ne $_.temperatureC }
 $maxTemperatureC = if ($validTemps.Count -gt 0) { [Math]::Round((($validTemps | Measure-Object temperatureC -Maximum).Maximum), 1) } else { $null }
-$temperatureNote = if ($validTemps.Count -gt 0) {
-  'Lectura ACPI disponible. Puede reflejar la zona térmica del equipo, no siempre el sensor exacto del CPU.'
-} else {
-  'Windows no expuso zonas térmicas ACPI en este equipo. Para temperatura exacta de CPU/GPU usa una herramienta de sensores dedicada.'
-}
-
+$temperatureNote = if ($validTemps.Count -gt 0) { 'Lectura térmica ACPI disponible.' } else { 'Windows no expuso una lectura térmica compatible.' }
 [PSCustomObject]@{
   generatedAt = (Get-Date).ToUniversalTime().ToString('o')
   computerName = $env:COMPUTERNAME
@@ -241,82 +264,37 @@ $temperatureNote = if ($validTemps.Count -gt 0) {
   thermalZones = @($thermalZones)
   recommendations = @()
 } | ConvertTo-Json -Compress -Depth 4
-"#;
-
-    run_powershell(script)
+"#)
 }
 
 #[cfg(target_os = "windows")]
 fn run_windows_thermal_status() -> Result<String, String> {
-    let script = r#"
+    run_powershell(r#"
 $ErrorActionPreference = 'SilentlyContinue'
-$thermalZones = @()
-
-try {
-  $thermalZones = Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature | ForEach-Object {
-    $tempC = $null
-    if ($null -ne $_.CurrentTemperature) {
-      $tempC = [Math]::Round(($_.CurrentTemperature / 10) - 273.15, 1)
-    }
-
-    [PSCustomObject]@{
-      name = $_.InstanceName
-      temperatureC = $tempC
-      source = 'root\wmi:MSAcpi_ThermalZoneTemperature'
-    }
-  }
-} catch {
-  $thermalZones = @()
+$zones = Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature | ForEach-Object {
+  [PSCustomObject]@{ name = $_.InstanceName; temperatureC = [Math]::Round(($_.CurrentTemperature / 10) - 273.15, 1) }
 }
-
-$validTemps = $thermalZones | Where-Object { $null -ne $_.temperatureC }
-$maxTemperatureC = if ($validTemps.Count -gt 0) { [Math]::Round((($validTemps | Measure-Object temperatureC -Maximum).Maximum), 1) } else { $null }
-$temperatureNote = if ($validTemps.Count -gt 0) {
-  'Lectura ACPI disponible. Puede reflejar la zona térmica del equipo, no siempre el sensor exacto del CPU.'
-} else {
-  'Windows no expuso zonas térmicas ACPI en este equipo. Para temperatura exacta de CPU/GPU usa una herramienta de sensores dedicada.'
-}
-
-[PSCustomObject]@{
-  generatedAt = (Get-Date).ToUniversalTime().ToString('o')
-  maxTemperatureC = $maxTemperatureC
-  temperatureNote = $temperatureNote
-  thermalZones = @($thermalZones)
-} | ConvertTo-Json -Compress -Depth 4
-"#;
-
-    run_powershell(script)
+$zones | ConvertTo-Json -Compress -Depth 3
+"#)
 }
 
 fn build_recommendations(report: &DiagnosticReport) -> Vec<String> {
     let mut items = Vec::new();
-
-    if report.system_drive_total_gb > 0.0 {
-        let free_ratio = report.system_drive_free_gb / report.system_drive_total_gb;
-        if free_ratio < 0.15 {
-            items.push("Espacio bajo en C:. Limpiar temporales y revisar carpetas pesadas antes de actualizar Windows.".to_string());
-        } else {
-            items.push("Espacio en disco aceptable. Mantener mínimo 15% libre para actualizaciones y rendimiento.".to_string());
-        }
+    if report.system_drive_total_gb > 0.0 && report.system_drive_free_gb / report.system_drive_total_gb < 0.15 {
+        items.push("Hay poco espacio libre en el disco principal.".to_string());
     }
-
     if report.startup_items > 14 {
-        items.push("Hay muchos programas iniciando con Windows. Revisar uno por uno, no desactivar drivers ni seguridad a ciegas.".to_string());
-    } else {
-        items.push("Cantidad de programas de inicio razonable. No hace falta tocarlo si el usuario no reporta lentitud.".to_string());
+        items.push("Hay muchos programas arrancando con Windows.".to_string());
     }
-
     if report.pending_reboot {
-        items.push("Hay reinicio pendiente. Reiniciar antes de diagnosticar errores raros o ejecutar reparaciones.".to_string());
+        items.push("Windows tiene un reinicio pendiente.".to_string());
     }
-
     if report.defender_status != "Activo" {
-        items.push("Defender no aparece activo. Verificar antivirus instalado, licencias y protección en tiempo real.".to_string());
+        items.push("La protección de Windows necesita revisión.".to_string());
     }
-
-    items.push("Crear punto de restauración antes de mantenimiento profundo.".to_string());
-    items.push("Evitar limpieza de registro y optimizadores agresivos: generan más problemas que soluciones.".to_string());
-
+    if report.max_temperature_c.unwrap_or(0.0) >= 85.0 {
+        items.push("La temperatura informada es alta.".to_string());
+    }
     items
 }
 
@@ -325,163 +303,172 @@ fn run_powershell(script: &str) -> Result<String, String> {
     let output = Command::new("powershell")
         .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script])
         .output()
-        .map_err(|err| format!("No se pudo ejecutar PowerShell: {err}"))?;
-
+        .map_err(|error| format!("No se pudo ejecutar la herramienta de Windows: {error}"))?;
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if detail.is_empty() { "Windows rechazó la acción.".to_string() } else { detail });
     }
-
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 fn scan_temp_files() -> Result<AgentActionResult, String> {
     #[cfg(target_os = "windows")]
     {
-        let script = r#"
-$paths = @($env:TEMP, 'C:\Windows\Temp') | Where-Object { Test-Path $_ }
-$items = foreach ($p in $paths) { Get-ChildItem $p -Recurse -Force -ErrorAction SilentlyContinue }
+        let raw = run_powershell(r#"
+$paths = @($env:TEMP) | Where-Object { $_ -and (Test-Path $_) }
+$items = foreach ($path in $paths) { Get-ChildItem $path -Recurse -Force -File -ErrorAction SilentlyContinue }
 $total = ($items | Measure-Object Length -Sum).Sum
-$count = ($items | Measure-Object).Count
-[PSCustomObject]@{ count = $count; gb = [Math]::Round($total / 1GB, 2); paths = $paths } | ConvertTo-Json -Compress
-"#;
-        let raw = run_powershell(script)?;
-        Ok(AgentActionResult {
-            action: "temp_scan".to_string(),
-            ok: true,
-            message: "Temporales escaneados. No se borró nada.".to_string(),
-            details: vec![raw],
-        })
+[PSCustomObject]@{ count = ($items | Measure-Object).Count; gb = [Math]::Round($total / 1GB, 2) } | ConvertTo-Json -Compress
+"#)?;
+        Ok(action_ok("temp_scan", "Terminé de buscar archivos temporales. No borré nada.", vec![raw]))
     }
-
     #[cfg(not(target_os = "windows"))]
+    { Ok(action_ok("temp_scan", "Esta revisión está disponible en Windows.", vec![])) }
+}
+
+fn clean_temp_files() -> Result<AgentActionResult, String> {
+    #[cfg(target_os = "windows")]
     {
-        Ok(AgentActionResult {
-            action: "temp_scan".to_string(),
-            ok: true,
-            message: "Escaneo demo: esta acción está implementada para Windows.".to_string(),
-            details: vec![],
-        })
+        let raw = run_powershell(r#"
+$cutoff = (Get-Date).AddDays(-1)
+$items = Get-ChildItem $env:TEMP -Recurse -Force -File -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt $cutoff }
+$deleted = 0
+$freed = 0
+foreach ($item in $items) {
+  try { $length = $item.Length; Remove-Item $item.FullName -Force -ErrorAction Stop; $deleted++; $freed += $length } catch {}
+}
+[PSCustomObject]@{ deleted = $deleted; freedGb = [Math]::Round($freed / 1GB, 2) } | ConvertTo-Json -Compress
+"#)?;
+        Ok(action_ok("clean_temp_files", "Liberé espacio borrando temporales antiguos.", vec![raw]))
     }
+    #[cfg(not(target_os = "windows"))]
+    { Ok(action_ok("clean_temp_files", "Esta limpieza está disponible en Windows.", vec![])) }
 }
 
 fn startup_review() -> Result<AgentActionResult, String> {
     #[cfg(target_os = "windows")]
     {
-        let script = r#"
-Get-CimInstance Win32_StartupCommand | Select-Object -First 12 Name, Command, Location | ConvertTo-Json -Compress -Depth 4
-"#;
-        let raw = run_powershell(script)?;
-        Ok(AgentActionResult {
-            action: "startup_review".to_string(),
-            ok: true,
-            message: "Inicio revisado. No se desactivó nada.".to_string(),
-            details: vec![raw],
-        })
+        let raw = run_powershell("Get-CimInstance Win32_StartupCommand | Select-Object -First 20 Name, Command, Location | ConvertTo-Json -Compress -Depth 4")?;
+        Ok(action_ok("startup_review", "Revisé los programas de inicio. No desactivé ninguno.", vec![raw]))
     }
-
     #[cfg(not(target_os = "windows"))]
+    { Ok(action_ok("startup_review", "Esta revisión está disponible en Windows.", vec![])) }
+}
+
+fn network_check() -> Result<AgentActionResult, String> {
+    #[cfg(target_os = "windows")]
     {
-        Ok(AgentActionResult {
-            action: "startup_review".to_string(),
-            ok: true,
-            message: "Revisión demo: esta acción está implementada para Windows.".to_string(),
-            details: vec![],
-        })
+        let raw = run_powershell(r#"
+$adapter = Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -First 1 Name, InterfaceDescription, LinkSpeed
+$gateway = Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Sort-Object RouteMetric | Select-Object -First 1 -ExpandProperty NextHop
+$dns = $false
+try { Resolve-DnsName microsoft.com -ErrorAction Stop | Out-Null; $dns = $true } catch {}
+$internet = Test-NetConnection 1.1.1.1 -Port 443 -InformationLevel Quiet
+[PSCustomObject]@{ adapter = $adapter; gateway = $gateway; dns = [bool]$dns; internet = [bool]$internet } | ConvertTo-Json -Compress -Depth 4
+"#)?;
+        Ok(action_ok("network_check", "Terminé de revisar la conexión.", vec![raw]))
     }
+    #[cfg(not(target_os = "windows"))]
+    { Ok(action_ok("network_check", "Esta revisión está disponible en Windows.", vec![])) }
+}
+
+fn repair_network() -> Result<AgentActionResult, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let raw = run_powershell("Clear-DnsClientCache; ipconfig /flushdns | Out-String")?;
+        Ok(action_ok("repair_network", "Limpié la caché de red. Probá Internet otra vez.", vec![raw]))
+    }
+    #[cfg(not(target_os = "windows"))]
+    { Ok(action_ok("repair_network", "Esta reparación está disponible en Windows.", vec![])) }
 }
 
 fn open_windows_update() -> Result<AgentActionResult, String> {
     #[cfg(target_os = "windows")]
     {
-        Command::new("cmd")
-            .arg("/C")
-            .arg("start")
-            .arg("")
-            .arg("ms-settings:windowsupdate")
-            .spawn()
-            .map_err(|err| format!("No se pudo abrir Windows Update: {err}"))?;
-
-        Ok(AgentActionResult {
-            action: "windows_update".to_string(),
-            ok: true,
-            message: "Windows Update abierto.".to_string(),
-            details: vec!["El usuario mantiene control visual de la acción.".to_string()],
-        })
+        Command::new("cmd").args(["/C", "start", "", "ms-settings:windowsupdate"]).spawn()
+            .map_err(|error| format!("No se pudo abrir Windows Update: {error}"))?;
+        Ok(action_ok("windows_update", "Abrí Windows Update para que vos controles la instalación.", vec![]))
     }
-
     #[cfg(not(target_os = "windows"))]
-    {
-        Ok(AgentActionResult {
-            action: "windows_update".to_string(),
-            ok: true,
-            message: "Windows Update no aplica fuera de Windows.".to_string(),
-            details: vec![],
-        })
-    }
+    { Ok(action_ok("windows_update", "Windows Update no aplica en este sistema.", vec![])) }
 }
 
 fn defender_status() -> Result<AgentActionResult, String> {
     #[cfg(target_os = "windows")]
     {
-        let script = r#"
+        let raw = run_powershell(r#"
 $defender = Get-MpComputerStatus
-[PSCustomObject]@{
-  amServiceEnabled = $defender.AMServiceEnabled
-  antivirusEnabled = $defender.AntivirusEnabled
-  realTimeProtectionEnabled = $defender.RealTimeProtectionEnabled
-  quickScanAge = $defender.QuickScanAge
-  fullScanAge = $defender.FullScanAge
-} | ConvertTo-Json -Compress
-"#;
-        let raw = run_powershell(script)?;
-        Ok(AgentActionResult {
-            action: "defender_status".to_string(),
-            ok: true,
-            message: "Estado de Defender leído.".to_string(),
-            details: vec![raw],
-        })
+[PSCustomObject]@{ service = $defender.AMServiceEnabled; antivirus = $defender.AntivirusEnabled; realtime = $defender.RealTimeProtectionEnabled; quickScanAge = $defender.QuickScanAge; fullScanAge = $defender.FullScanAge } | ConvertTo-Json -Compress
+"#)?;
+        Ok(action_ok("defender_status", "Terminé de revisar la seguridad de Windows.", vec![raw]))
     }
-
     #[cfg(not(target_os = "windows"))]
+    { Ok(action_ok("defender_status", "Microsoft Defender no aplica en este sistema.", vec![])) }
+}
+
+fn defender_quick_scan() -> Result<AgentActionResult, String> {
+    #[cfg(target_os = "windows")]
     {
-        Ok(AgentActionResult {
-            action: "defender_status".to_string(),
-            ok: true,
-            message: "Defender no aplica fuera de Windows.".to_string(),
-            details: vec![],
-        })
+        run_powershell("Start-MpScan -ScanType QuickScan")?;
+        Ok(action_ok("defender_quick_scan", "Inicié el análisis rápido de Microsoft Defender.", vec!["El análisis continúa con las herramientas oficiales de Windows.".to_string()]))
     }
+    #[cfg(not(target_os = "windows"))]
+    { Ok(action_ok("defender_quick_scan", "Microsoft Defender no aplica en este sistema.", vec![])) }
 }
 
 #[cfg(target_os = "windows")]
 fn find_rustdesk() -> Option<PathBuf> {
     let mut candidates = Vec::new();
-
     if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.push(dir.join("tools").join("rustdesk").join("rustdesk.exe"));
-            candidates.push(dir.join("rustdesk.exe"));
+        if let Some(directory) = exe.parent() {
+            candidates.push(directory.join("tools").join("rustdesk").join("rustdesk.exe"));
+            candidates.push(directory.join("rustdesk.exe"));
         }
     }
-
     candidates.push(PathBuf::from(r"C:\Program Files\RustDesk\RustDesk.exe"));
     candidates.push(PathBuf::from(r"C:\Program Files (x86)\RustDesk\RustDesk.exe"));
-
     candidates.into_iter().find(|path| path.exists())
 }
 
 #[cfg(not(target_os = "windows"))]
 fn whoami_fallback() -> String {
-    std::env::var("USERNAME")
-        .or_else(|_| std::env::var("USER"))
-        .unwrap_or_else(|_| "usuario".to_string())
+    std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_else(|_| "usuario".to_string())
 }
 
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(|app| {
+            let window = app.get_webview_window("main").expect("main window missing");
+            let close_window = window.clone();
+            window.on_window_event(move |event| {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = close_window.hide();
+                }
+            });
+
+            TrayIconBuilder::with_id("nexo-support")
+                .icon(app.default_window_icon().expect("default app icon missing").clone())
+                .tooltip("NEXO Support")
+                .show_menu_on_left_click(false)
+                .on_tray_icon_event(|tray, event| match event {
+                    TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } => toggle_popup(tray.app_handle()),
+                    _ => {}
+                })
+                .build(app)?;
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
+            hide_main_window,
+            minimize_main_window,
+            exit_app,
             run_quick_diagnostic,
             thermal_status,
             create_remote_session,
@@ -490,5 +477,5 @@ pub fn run() {
             open_remote_tool
         ])
         .run(tauri::generate_context!())
-        .expect("error while running UnderDock");
+        .expect("error while running NEXO Support");
 }
