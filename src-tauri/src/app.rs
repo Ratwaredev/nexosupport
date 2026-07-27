@@ -2,6 +2,7 @@ mod actions;
 mod diagnostics;
 mod sensors;
 mod types;
+mod updates;
 mod windows;
 
 use tauri::{
@@ -57,7 +58,9 @@ pub fn run() {
             actions::create_remote_session,
             actions::agent_status,
             actions::run_agent_action,
-            actions::open_remote_tool
+            actions::open_remote_tool,
+            updates::check_app_update,
+            updates::install_app_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running NEXO Support");
