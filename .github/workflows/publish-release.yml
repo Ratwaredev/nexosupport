@@ -44,7 +44,8 @@ jobs:
           }
 
       - name: Build and publish GitHub Release
-        uses: tauri-apps/tauri-action@v0
+        id: publish_release
+        uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -73,3 +74,25 @@ jobs:
           uploadUpdaterJson: true
           uploadUpdaterSignatures: true
           retryAttempts: 2
+
+      - name: Record release result
+        if: always()
+        shell: pwsh
+        env:
+          RELEASE_URL: ${{ steps.publish_release.outputs.releaseHtmlUrl }}
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $result = [ordered]@{
+            version = $version
+            status = '${{ job.status }}'
+            runId = '${{ github.run_id }}'
+            commit = '${{ github.sha }}'
+            releaseUrl = $env:RELEASE_URL
+            recordedAt = (Get-Date).ToUniversalTime().ToString('o')
+          } | ConvertTo-Json
+          Set-Content -Path .release-result.json -Value $result -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .release-result.json
+          git commit -m "chore: record NEXO release $version ${{ job.status }}" || exit 0
+          git push origin "HEAD:${{ github.ref_name }}"
