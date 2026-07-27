@@ -62,7 +62,7 @@ body,
 
 .nexo-popup:has(.activation) .composer-area form {
   height: 50px;
-  grid-template-columns: minmax(0, 1fr) 50px;
+  grid-template-columns: minmax(0, 1fr) 96px;
   gap: 8px;
 }
 
@@ -86,6 +86,16 @@ body,
 
 .nexo-popup:has(.activation) .composer-area form > button {
   border-radius: 12px;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.nexo-popup:has(.activation) .composer-area form > button svg {
+  display: none;
+}
+
+.nexo-popup:has(.activation) .composer-area form > button::after {
+  content: "Continuar";
 }
 
 .nexo-popup:has(.activation) .footer-meta {
