@@ -24,9 +24,29 @@ jobs:
         shell: pwsh
         run: ./scripts/prepare-sensors.ps1
       - name: Validate frontend
-        run: npm run build
+        shell: pwsh
+        run: |
+          npm run build *>&1 | Tee-Object -FilePath frontend.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload frontend diagnostic
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexo-frontend-log
+          path: frontend.log
+          if-no-files-found: ignore
       - name: Validate Tauri backend
-        run: cargo check --manifest-path src-tauri/Cargo.toml
+        shell: pwsh
+        run: |
+          cargo check --manifest-path src-tauri/Cargo.toml *>&1 | Tee-Object -FilePath cargo.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload Rust diagnostic
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexo-rust-log
+          path: cargo.log
+          if-no-files-found: ignore
       - name: Build unsigned Windows installer
         run: npm run tauri:build -- --config src-tauri/tauri.ci.conf.json
       - name: Upload Windows installer
