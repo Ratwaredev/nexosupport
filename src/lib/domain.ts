@@ -227,7 +227,7 @@ export type UpdateConsentInput = Pick<DeviceConsentRecord,
   'assistantEnabled' | 'shareDiagnostics' | 'automaticChecks' | 'hardwareSensors' | 'elevatedSensors'
 >;
 
-export const APP_VERSION = '0.2.1';
+export const APP_VERSION = '0.2.2';
 
 export const STORAGE_KEYS = {
   session: 'underdock.session.v1',
