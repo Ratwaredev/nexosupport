@@ -12,22 +12,19 @@ if ((Test-Path $DllTarget) -and (Test-Path $LicenseTarget)) {
 }
 
 $Work = Join-Path $env:TEMP ("nexo-lhm-" + [Guid]::NewGuid().ToString('N'))
-$Packages = Join-Path $Work 'packages'
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
 try {
-  $Project = Join-Path $Work 'Sensors.csproj'
-  @"
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
-  <ItemGroup><PackageReference Include="LibreHardwareMonitorLib" Version="$Version" /></ItemGroup>
-</Project>
-"@ | Set-Content -Path $Project -Encoding UTF8
+  $Archive = Join-Path $Work 'LibreHardwareMonitorLib.zip'
+  $PackageRoot = Join-Path $Work 'package'
+  $Url = "https://api.nuget.org/v3-flatcontainer/librehardwaremonitorlib/$Version/librehardwaremonitorlib.$Version.nupkg"
 
-  Write-Host "Restaurando LibreHardwareMonitorLib $Version desde NuGet oficial..."
-  dotnet restore $Project --packages $Packages --nologo
-  if ($LASTEXITCODE -ne 0) { throw 'NuGet no pudo restaurar LibreHardwareMonitorLib.' }
+  Write-Host "Descargando LibreHardwareMonitorLib $Version desde NuGet oficial..."
+  & curl.exe --fail --location --retry 3 --silent --show-error --output $Archive $Url
+  if ($LASTEXITCODE -ne 0) { throw "NuGet rechazó la descarga con código $LASTEXITCODE." }
+  if (-not (Test-Path $Archive)) { throw 'NuGet no generó el archivo descargado.' }
+  if ((Get-Item $Archive).Length -lt 10000) { throw 'La descarga de NuGet es demasiado pequeña y no parece un paquete válido.' }
 
-  $PackageRoot = Join-Path $Packages "librehardwaremonitorlib\$Version"
+  Expand-Archive -Path $Archive -DestinationPath $PackageRoot -Force
   $Candidates = @(
     (Join-Path $PackageRoot 'lib\net472\LibreHardwareMonitorLib.dll'),
     (Join-Path $PackageRoot 'lib\netstandard2.0\LibreHardwareMonitorLib.dll'),
