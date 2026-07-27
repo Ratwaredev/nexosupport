@@ -1,65 +1,73 @@
 # NEXO Support
 
-Aplicación de asistencia técnica para Windows construida con Tauri, React y TypeScript.
+Asistente técnico de escritorio para Windows construido con Tauri, React y TypeScript.
 
-NEXO Support reemplaza la antigua interfaz de UnderDock por un flujo directo y entendible para clientes y técnicos, sin alterar la infraestructura de diagnóstico, sincronización, soporte remoto ni actualizaciones.
+No es un dashboard tradicional. La aplicación vive en la bandeja del sistema y abre un popup compacto de chat cuando el usuario toca el icono de NEXO.
 
-## Flujos
+## Producto
 
-### Cliente
+El usuario no configura modelos, API keys ni herramientas. Solo activa la PC con un código entregado por NEXO y escribe lo que le pasa.
 
-1. Ingresa el código entregado por el técnico.
-2. Describe el problema antes de vincular el equipo.
-3. Ejecuta un diagnóstico bajo demanda.
-4. Crea una solicitud de asistencia.
-5. Abre la herramienta remota cuando existe una sesión activa.
-6. Consulta el estado del equipo y las actualizaciones disponibles.
+NEXO puede:
 
-### Técnico
+- revisar memoria, disco, inicio, seguridad, reinicios pendientes y temperatura;
+- comprobar conexión, DNS y adaptadores de red;
+- buscar archivos temporales sin borrarlos;
+- revisar programas de inicio sin desactivarlos;
+- ejecutar limpiezas limitadas y reparaciones seguras después de una confirmación visible;
+- iniciar un análisis rápido oficial de Microsoft Defender;
+- abrir Windows Update bajo control del usuario;
+- crear una solicitud y abrir soporte remoto cuando hace falta;
+- realizar una revisión liviana cada cuatro horas mientras la app está ejecutándose y avisar solo si encuentra algo relevante.
 
-- Revisa solicitudes y su estado.
-- Consulta equipos vinculados.
-- Genera códigos de acceso con vencimiento.
-- Inicia asistencia remota.
-- Cambia solicitudes entre nueva, en espera, en asistencia y resuelta.
-- Revisa versiones publicadas y el estado del updater.
+## Reglas de seguridad
 
-## Identidad visual
+La IA nunca ejecuta comandos arbitrarios. OpenRouter solo puede solicitar herramientas incluidas en una lista cerrada. La app vuelve a validar el nombre de la herramienta localmente.
 
-La interfaz usa el sistema visual de NEXO:
+- Lecturas: pueden ejecutarse automáticamente.
+- Cambios: requieren el botón **Sí, hacelo**.
+- Acceso remoto: requiere una solicitud explícita del usuario.
+- Prohibido: limpieza de registro, desactivar antivirus, borrar carpetas del sistema, tocar drivers a ciegas o ejecutar scripts generados por el modelo.
 
-- base clara y espaciosa;
-- tipografía Helvetica/Arial;
-- acentos violeta `#7a3cff` y azul `#188fff`;
-- marca NEXO con la X en gradiente;
-- nuevo ícono de escritorio e instalador;
-- componentes responsive para escritorio, notebook y pantallas angostas.
+## OpenRouter y planes
 
-## Funcionalidad preservada
+La clave de OpenRouter no se incluye en el ejecutable.
 
-- Diagnóstico de Windows mediante Tauri + PowerShell/WMI.
-- Backend local de demostración con persistencia en el navegador.
-- Backend compatible con Supabase para sincronización entre equipos.
-- Integración con RustDesk para asistencia remota.
-- Actualizador nativo de Tauri mediante GitHub Releases.
-- Identificador de aplicación y claves de almacenamiento existentes, para no cortar instalaciones ni sesiones previas.
+1. La app envía la conversación al endpoint privado de NEXO: `VITE_NEXO_API_URL/api/assistant`.
+2. El servidor valida el `device_token` contra Supabase.
+3. `public.device_entitlements` determina si el asistente está activo, el plan, el límite mensual y el modelo.
+4. El servidor llama a OpenRouter con tool calling y devuelve como máximo una herramienta por turno.
+5. La herramienta se ejecuta en la PC únicamente si está autorizada por el catálogo local.
 
-## Modo local
-
-Sin variables de Supabase, el proyecto funciona en modo demo durante desarrollo.
-
-- Acceso técnico visible: `admin@nexo.local` / `admin123`
-- Código de cliente: `DEMO-PAIR`
-- Los datos quedan en el perfil local del navegador.
+El modelo puede definirse por plan mediante `NEXO_MODEL_BASIC`, `NEXO_MODEL_PRO`, etc., o por dispositivo con `device_entitlements.model`.
 
 ## Configuración
 
-1. Crear un proyecto en Supabase.
-2. Ejecutar `infra/supabase/schema.sql`.
-3. Crear el usuario técnico y su fila en `public.admin_users`.
-4. Copiar `.env.example` como `.env` y completar las variables.
-5. Configurar la herramienta remota o su URL.
-6. Publicar un manifiesto válido para el updater de Tauri.
+### Supabase
+
+1. Ejecutar `infra/supabase/schema.sql`.
+2. Ejecutar `infra/supabase/nexo-assistant.sql`.
+3. Generar un código de vinculación desde el sistema de NEXO.
+4. Activar el entitlement del dispositivo y asignar plan/modelo.
+
+### Desktop
+
+Copiar `.env.example` como `.env` y completar Supabase y `VITE_NEXO_API_URL`.
+
+### Servidor
+
+Desplegar `api/assistant.ts` en Vercel o un runtime Edge compatible y configurar las variables de `.env.server.example`.
+
+Nunca colocar `OPENROUTER_API_KEY` ni `SUPABASE_SERVICE_ROLE_KEY` en variables `VITE_*`.
+
+## Comportamiento de ventana
+
+- Tamaño base: 410 × 640 px.
+- Sin barra nativa ni icono en la taskbar.
+- Arranca oculta.
+- Clic izquierdo en el icono de bandeja: mostrar/ocultar popup.
+- La X oculta la ventana, no termina el agente.
+- **Cerrar NEXO** desde el menú sí termina el proceso.
 
 ## Desarrollo
 
@@ -68,20 +76,13 @@ npm install
 npm run tauri:dev
 ```
 
+En desarrollo la ventana comienza oculta. Abrila desde el icono de NEXO en la bandeja.
+
 ## Build
 
 ```bash
+npm run build
 npm run tauri:build
 ```
 
-Los instaladores se generan en `src-tauri/target/release/bundle/` con el nombre de producto **NEXO Support**.
-
-## Actualizaciones
-
-El endpoint continúa usando las releases de `Ratwaredev/underdocksoporteapp` para mantener compatibilidad con las instalaciones existentes. Cada release debe incluir:
-
-- instalador NSIS o MSI;
-- archivo `.sig` correspondiente;
-- `latest.json` con versión, notas, fecha, URL y firma.
-
-La clave privada de firma no debe guardarse en el repositorio.
+El updater conserva el identificador y el feed de releases existentes para no cortar instalaciones previas.
