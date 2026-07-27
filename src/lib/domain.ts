@@ -230,6 +230,7 @@ export type UpdateConsentInput = Pick<DeviceConsentRecord,
 export const APP_VERSION = '0.1.7';
 
 export const STORAGE_KEYS = {
+  session: 'underdock.session.v1',
   legacySession: 'underdock.session.v1',
   clientSession: 'nexo.client-session.v2',
   adminSession: 'nexo.admin-session.v2',
