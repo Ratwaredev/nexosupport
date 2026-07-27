@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "UnderDock Command UI",
+  "productName": "NEXO Support",
   "version": "0.1.7",
   "identifier": "dev.ratware.underdock",
   "build": {
@@ -12,13 +12,14 @@
   "app": {
     "windows": [
       {
-        "title": "UnderDock Command UI",
-        "width": 1440,
+        "title": "NEXO Support",
+        "width": 1320,
         "height": 820,
-        "minWidth": 1100,
-        "minHeight": 720,
+        "minWidth": 900,
+        "minHeight": 650,
         "resizable": true,
-        "decorations": true
+        "decorations": true,
+        "center": true
       }
     ],
     "security": {
