@@ -6,8 +6,7 @@ export const isTauriRuntime = () => {
 
 export async function safeInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (!isTauriRuntime()) {
-    throw new Error('UnderDock está corriendo en modo navegador de desarrollo.');
+    throw new Error('NEXO Support está corriendo en modo navegador de desarrollo.');
   }
-
   return invoke<T>(command, args);
 }

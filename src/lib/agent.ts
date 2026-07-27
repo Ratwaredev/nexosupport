@@ -17,29 +17,23 @@ export type AgentActionResult = {
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function getAgentStatus(): Promise<AgentStatus> {
-  if (isTauriRuntime()) {
-    return safeInvoke<AgentStatus>('agent_status');
-  }
-
-  await wait(400);
+  if (isTauriRuntime()) return safeInvoke<AgentStatus>('agent_status');
+  await wait(260);
   return {
     mode: 'on-demand/dev',
     monitoring: false,
     version: '0.1.0-dev',
-    notes: 'Modo navegador: el agent real corre dentro de Tauri.'
+    notes: 'Modo navegador: las herramientas reales corren dentro de la app de Windows.'
   };
 }
 
 export async function runAgentAction(actionId: string): Promise<AgentActionResult> {
-  if (isTauriRuntime()) {
-    return safeInvoke<AgentActionResult>('run_agent_action', { actionId });
-  }
-
-  await wait(650);
+  if (isTauriRuntime()) return safeInvoke<AgentActionResult>('run_agent_action', { actionId });
+  await wait(720);
   return {
     action: actionId,
     ok: true,
-    message: `Acción demo ejecutada: ${actionId}`,
-    details: ['No se modificó el sistema.', 'En build Tauri se ejecuta el comando on-demand.']
+    message: actionId === 'network_check' ? 'La conexión responde correctamente.' : `Acción de prueba completada: ${actionId}`,
+    details: ['Vista de navegador: no se modificó el sistema.', 'En el ejecutable Tauri se usa la herramienta local autorizada.']
   };
 }

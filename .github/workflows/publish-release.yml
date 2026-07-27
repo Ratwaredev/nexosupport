@@ -1,0 +1,90 @@
+name: Publish NEXO Support release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: nexo-production-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Set unique release version
+        shell: pwsh
+        run: |
+          $version = "0.3.${{ github.run_number }}"
+          node scripts/set-release-version.mjs $version
+          "NEXO_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare hardware sensor library
+        shell: pwsh
+        run: ./scripts/prepare-sensors.ps1
+
+      - name: Validate frontend
+        run: npm run build
+
+      - name: Validate Tauri backend
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Verify updater signing key
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            throw 'Missing TAURI_SIGNING_PRIVATE_KEY.'
+          }
+
+      - name: Build and publish GitHub Release
+        uses: tauri-apps/tauri-action@v0.6.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_NEXO_API_URL: ${{ secrets.VITE_NEXO_API_URL }}
+          VITE_DEFAULT_ORG_NAME: ${{ secrets.VITE_DEFAULT_ORG_NAME }}
+          VITE_REMOTE_TOOL_URL: ${{ secrets.VITE_REMOTE_TOOL_URL }}
+          VITE_LOCAL_ADMIN_EMAIL: ${{ secrets.VITE_LOCAL_ADMIN_EMAIL }}
+          VITE_LOCAL_ADMIN_PASSWORD: ${{ secrets.VITE_LOCAL_ADMIN_PASSWORD }}
+          VITE_LOCAL_ADMIN_ORG: ${{ secrets.VITE_LOCAL_ADMIN_ORG }}
+        with:
+          tagName: v__VERSION__
+          releaseName: NEXO Support v__VERSION__
+          releaseBody: |
+            Actualización automática desde main.
+
+            - Interfaz inicial simplificada.
+            - Inicio inmediato del diagnóstico.
+            - Mejoras generales de NEXO Support.
+          releaseDraft: false
+          prerelease: false
+          updaterJsonPreferNsis: true
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
+          retryAttempts: 2

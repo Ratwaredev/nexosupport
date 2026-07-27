@@ -1,7 +1,7 @@
 [package]
 name = "underdock"
-version = "0.1.7"
-description = "UnderDock desktop support app"
+version = "0.2.2"
+description = "NEXO Support desktop assistance app"
 authors = ["Ratwaredev"]
 edition = "2021"
 
@@ -14,7 +14,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
