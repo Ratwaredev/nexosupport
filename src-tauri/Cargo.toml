@@ -1,6 +1,6 @@
 [package]
 name = "underdock"
-version = "0.2.1"
+version = "0.2.2"
 description = "NEXO Support desktop assistance app"
 authors = ["Ratwaredev"]
 edition = "2021"
