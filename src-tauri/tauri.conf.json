@@ -24,7 +24,7 @@
         "maximizable": false,
         "decorations": false,
         "transparent": true,
-        "visible": false,
+        "visible": true,
         "skipTaskbar": true,
         "shadow": true,
         "center": false
