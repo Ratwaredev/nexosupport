@@ -2,7 +2,7 @@
 
 Asistente técnico de escritorio para Windows construido con Tauri, React y TypeScript.
 
-No es un dashboard tradicional. La aplicación vive en la bandeja del sistema y abre un popup compacto de chat cuando el usuario toca el icono de NEXO.
+No es un dashboard tradicional. La aplicación abre un popup compacto de chat y, al cerrarlo, sigue disponible desde la bandeja del sistema.
 
 ## Producto
 
@@ -64,7 +64,7 @@ Nunca colocar `OPENROUTER_API_KEY` ni `SUPABASE_SERVICE_ROLE_KEY` en variables `
 
 - Tamaño base: 410 × 640 px.
 - Sin barra nativa ni icono en la taskbar.
-- Arranca oculta.
+- Abre como popup compacto al ejecutar para que el primer uso sea obvio.
 - Clic izquierdo en el icono de bandeja: mostrar/ocultar popup.
 - La X oculta la ventana, no termina el agente.
 - **Cerrar NEXO** desde el menú sí termina el proceso.
@@ -75,8 +75,6 @@ Nunca colocar `OPENROUTER_API_KEY` ni `SUPABASE_SERVICE_ROLE_KEY` en variables `
 npm install
 npm run tauri:dev
 ```
-
-En desarrollo la ventana comienza oculta. Abrila desde el icono de NEXO en la bandeja.
 
 ## Build
 
