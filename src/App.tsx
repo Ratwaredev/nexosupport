@@ -1,20 +1,27 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { ChangeEvent, KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import {
   Activity,
   ArrowDownToLine,
   ArrowRight,
-  Bell,
-  Check,
-  ClipboardList,
+  CheckCircle2,
+  Clipboard,
+  Clock3,
+  Cpu,
   HardDrive,
-  Lock,
-  MonitorCog,
+  Laptop,
+  LockKeyhole,
+  LogOut,
+  Monitor,
   RefreshCw,
+  Server,
   ShieldCheck,
   Thermometer,
-  Wifi,
-  Wrench
+  Ticket,
+  Users,
+  Wrench,
+  X,
+  Zap
 } from 'lucide-react';
 import { appBackend, backendConfig } from './lib/backend';
 import type {
@@ -32,29 +39,64 @@ import { checkForUpdates as checkNativeUpdates, installLatestUpdate as installNa
 import { openRemoteTool, RemoteSession } from './lib/support';
 import { AgentActionResult, AgentStatus, getAgentStatus, runAgentAction } from './lib/agent';
 
-type AdminTab = 'queue' | 'devices' | 'releases';
-type ClientTab = 'overview' | 'ticket' | 'maintenance';
+type AdminView = 'requests' | 'devices' | 'releases';
+type Toast = { message: string; tone: 'neutral' | 'success' | 'warning' | 'danger' } | null;
 
-type Toast = { message: string; tone?: 'neutral' | 'ok' | 'warn' | 'danger' } | null;
+const dateFormatter = new Intl.DateTimeFormat('es-AR', {
+  day: '2-digit',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit'
+});
 
-function readThermalMax(payload: Record<string, unknown> | undefined): number | null {
-  if (!payload) return null;
-  const value = payload.maxTemperatureC;
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+function formatDate(value?: string) {
+  if (!value) return 'Sin registro';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Sin registro' : dateFormatter.format(date);
+}
+
+function ticketLabel(id?: string) {
+  if (!id) return 'Sin solicitud';
+  return id.replace(/^UD-/, 'NX-');
+}
+
+function statusLabel(status?: TicketStatus) {
+  switch (status) {
+    case 'nuevo': return 'Nueva';
+    case 'esperando': return 'En espera';
+    case 'en-remoto': return 'En asistencia';
+    case 'cerrado': return 'Resuelta';
+    default: return 'Sin estado';
+  }
+}
+
+function statusTone(status?: TicketStatus) {
+  switch (status) {
+    case 'nuevo': return 'purple';
+    case 'esperando': return 'amber';
+    case 'en-remoto': return 'blue';
+    case 'cerrado': return 'green';
+    default: return 'muted';
+  }
 }
 
 function App() {
   const [booting, setBooting] = useState(true);
   const [session, setSession] = useState<AppSession | null>(null);
-  const [adminTab, setAdminTab] = useState<AdminTab>('queue');
-  const [clientTab, setClientTab] = useState<ClientTab>('overview');
+  const [adminView, setAdminView] = useState<AdminView>('requests');
   const [toast, setToast] = useState<Toast>(null);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
 
-  const [adminEmail, setAdminEmail] = useState(backendConfig.localAdminEmail);
-  const [adminPassword, setAdminPassword] = useState(backendConfig.localAdminPassword);
-  const [clientPairingCode, setClientPairingCode] = useState(backendConfig.backendKind === 'local' ? 'DEMO-PAIR' : '');
-  const [clientIssue, setClientIssue] = useState('Mi PC esta lenta y necesito soporte remoto.');
+  const [adminEmail, setAdminEmail] = useState(
+    backendConfig.backendKind === 'local' ? 'admin@nexo.local' : ''
+  );
+  const [adminPassword, setAdminPassword] = useState(
+    backendConfig.backendKind === 'local' ? backendConfig.localAdminPassword : ''
+  );
+  const [clientPairingCode, setClientPairingCode] = useState(
+    backendConfig.backendKind === 'local' ? 'DEMO-PAIR' : ''
+  );
+  const [clientIssue, setClientIssue] = useState('');
 
   const [adminDashboard, setAdminDashboard] = useState<AdminDashboard | null>(null);
   const [clientDashboard, setClientDashboard] = useState<ClientDashboard | null>(null);
@@ -66,32 +108,36 @@ function App() {
   const [updateResult, setUpdateResult] = useState<UpdateResult | null>(null);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [agentResult, setAgentResult] = useState<AgentActionResult | null>(null);
-  const [pairingGenerated, setPairingGenerated] = useState<string>('');
-  const [selectedTicketId, setSelectedTicketId] = useState<string>('');
+  const [pairingGenerated, setPairingGenerated] = useState('');
+  const [selectedTicketId, setSelectedTicketId] = useState('');
 
   const selectedTicket = useMemo<TicketRecord | undefined>(() => {
-    const tickets = session?.role === 'admin' ? adminDashboard?.tickets ?? [] : clientDashboard?.tickets ?? [];
-    return tickets.find((ticket) => ticket.id === selectedTicketId) ?? tickets[0];
+    const tickets = session?.role === 'admin'
+      ? adminDashboard?.tickets ?? []
+      : clientDashboard?.tickets ?? [];
+    return tickets.find((ticketItem) => ticketItem.id === selectedTicketId) ?? tickets[0];
   }, [adminDashboard?.tickets, clientDashboard?.tickets, selectedTicketId, session?.role]);
 
   const openTickets = useMemo(() => {
-    if (session?.role === 'admin') return (adminDashboard?.tickets ?? []).filter((ticket) => ticket.status !== 'cerrado');
-    return (clientDashboard?.tickets ?? []).filter((ticket) => ticket.status !== 'cerrado');
+    const tickets = session?.role === 'admin'
+      ? adminDashboard?.tickets ?? []
+      : clientDashboard?.tickets ?? [];
+    return tickets.filter((ticketItem) => ticketItem.status !== 'cerrado');
   }, [adminDashboard?.tickets, clientDashboard?.tickets, session?.role]);
 
   useEffect(() => {
     let alive = true;
 
-    (async () => {
-      try {
-        const restored = await appBackend.bootstrap();
+    void appBackend.bootstrap()
+      .then((restored) => {
         if (alive) setSession(restored);
-      } catch {
+      })
+      .catch(() => {
         if (alive) setSession(null);
-      } finally {
+      })
+      .finally(() => {
         if (alive) setBooting(false);
-      }
-    })();
+      });
 
     return () => {
       alive = false;
@@ -106,6 +152,7 @@ function App() {
     if (!accessToken || !backendConfig.supabaseUrl || !backendConfig.supabaseAnonKey) return;
 
     let alive = true;
+
     const restoreSession = async () => {
       try {
         const baseUrl = backendConfig.supabaseUrl?.replace(/\/$/, '');
@@ -126,13 +173,17 @@ function App() {
           `${baseUrl}/rest/v1/admin_users?select=*&user_id=eq.${encodeURIComponent(user.id)}&limit=1`,
           { headers }
         );
-
         if (!profileResponse.ok) return;
-        const profiles = await profileResponse.json() as Array<{ user_id: string; email: string; org_name: string }>;
+
+        const profiles = await profileResponse.json() as Array<{
+          user_id: string;
+          email: string;
+          org_name: string;
+        }>;
         const profile = profiles[0];
         if (!profile) return;
 
-        const session: AppSession = {
+        const restoredSession: AppSession = {
           role: 'admin',
           backendKind: 'supabase',
           userId: user.id,
@@ -143,19 +194,18 @@ function App() {
           orgName: profile.org_name
         };
 
-        window.localStorage.setItem(STORAGE_KEYS.session, JSON.stringify(session));
+        window.localStorage.setItem(STORAGE_KEYS.session, JSON.stringify(restoredSession));
         if (alive) {
-          setSession(session);
+          setSession(restoredSession);
           setShowAdminLogin(false);
           window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
         }
       } catch {
-        // Ignore hash restore errors and fall back to the regular login form.
+        // The regular login remains available if the OAuth hash cannot be restored.
       }
     };
 
     void restoreSession();
-
     return () => {
       alive = false;
     };
@@ -164,29 +214,10 @@ function App() {
   useEffect(() => {
     let alive = true;
 
-    (async () => {
-      const result = await checkNativeUpdates();
+    void checkNativeUpdates().then((result) => {
       if (!alive) return;
       setUpdateResult(result);
-
-      if (result.status !== 'available') return;
-
-      try {
-        setIsUpdating(true);
-        setUpdateProgress('0%');
-        const installed = await installNativeUpdate((progress) => {
-          if (alive) setUpdateProgress(progress);
-        });
-        if (alive) {
-          setUpdateResult(installed);
-        }
-      } finally {
-        if (alive) {
-          setIsUpdating(false);
-          setUpdateProgress('');
-        }
-      }
-    })();
+    }).catch(() => undefined);
 
     return () => {
       alive = false;
@@ -205,50 +236,26 @@ function App() {
 
     if (session.role === 'admin') {
       void refreshAdmin();
-      void loadMaintenanceTelemetry();
-      return;
+    } else {
+      void refreshClient(session.deviceToken ?? '');
     }
-
-    void refreshClient(session.deviceToken ?? '');
     void loadMaintenanceTelemetry();
   }, [session]);
 
   useEffect(() => {
     if (!toast) return;
-    const timeout = window.setTimeout(() => setToast(null), 3500);
+    const timeout = window.setTimeout(() => setToast(null), 3600);
     return () => window.clearTimeout(timeout);
   }, [toast]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.ctrlKey && event.altKey && event.key.toLowerCase() === 'a') {
-        event.preventDefault();
-        setShowAdminLogin(true);
-      }
-
-      if (event.key === 'Escape') {
-        setShowAdminLogin(false);
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
 
   async function refreshAdmin() {
     setIsBusy(true);
     try {
       const dashboard = await appBackend.getAdminDashboard();
       setAdminDashboard(dashboard);
-      if (!selectedTicketId && dashboard.tickets[0]?.id) {
-        setSelectedTicketId(dashboard.tickets[0].id);
-      }
-      setAdminTab((current) => current);
-      if (dashboard.tickets[0]?.id) {
-        setClientIssue(dashboard.tickets[0].issue);
-      }
+      setSelectedTicketId((current) => current || dashboard.tickets[0]?.id || '');
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'No se pudo cargar el panel admin.', 'danger');
+      notify(error instanceof Error ? error.message : 'No se pudo cargar el panel técnico.', 'danger');
     } finally {
       setIsBusy(false);
     }
@@ -260,9 +267,8 @@ function App() {
     try {
       const dashboard = await appBackend.getClientDashboard(deviceToken);
       setClientDashboard(dashboard);
-      if (!selectedTicketId && dashboard.tickets[0]?.id) {
-        setSelectedTicketId(dashboard.tickets[0].id);
-      }
+      setSelectedTicketId((current) => current || dashboard.tickets[0]?.id || '');
+
       const latestDiagnostic = dashboard.diagnostics[0];
       if (latestDiagnostic) {
         setDiagnostic(latestDiagnostic.payload as unknown as DiagnosticReport);
@@ -275,7 +281,7 @@ function App() {
         });
       }
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'No se pudo cargar el panel cliente.', 'danger');
+      notify(error instanceof Error ? error.message : 'No se pudo cargar el estado del equipo.', 'danger');
     } finally {
       setIsBusy(false);
     }
@@ -283,8 +289,7 @@ function App() {
 
   async function loadMaintenanceTelemetry() {
     try {
-      const status = await getAgentStatus();
-      setAgentStatus(status);
+      setAgentStatus(await getAgentStatus());
     } catch {
       setAgentStatus(null);
     }
@@ -305,35 +310,53 @@ function App() {
       setAgentResult(null);
       setSelectedTicketId('');
       setShowAdminLogin(false);
-      notify('Sesion cerrada.', 'neutral');
+      notify('Sesión cerrada.', 'neutral');
     });
   }
 
   async function handleAdminSignIn() {
+    if (!adminEmail.trim() || !adminPassword) {
+      notify('Completá el correo y la contraseña.', 'warning');
+      return;
+    }
+
     setIsBusy(true);
     try {
-      const result = await appBackend.signInAdmin(adminEmail, adminPassword);
+      const email = backendConfig.backendKind === 'local' && adminEmail.trim() === 'admin@nexo.local'
+        ? backendConfig.localAdminEmail
+        : adminEmail.trim();
+      const result = await appBackend.signInAdmin(email, adminPassword);
       setSession(result.session);
       setAdminDashboard(await appBackend.getAdminDashboard());
-      setAdminTab('queue');
-      notify('Admin autenticado.', 'ok');
+      setAdminView('requests');
+      setShowAdminLogin(false);
+      notify('Acceso técnico iniciado.', 'success');
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'No se pudo iniciar sesion.', 'danger');
+      notify(error instanceof Error ? error.message : 'No se pudo iniciar sesión.', 'danger');
     } finally {
       setIsBusy(false);
     }
   }
 
   async function handleClientRegister() {
+    if (!clientPairingCode.trim()) {
+      notify('Ingresá el código que te dio el equipo de soporte.', 'warning');
+      return;
+    }
+    if (clientIssue.trim().length < 8) {
+      notify('Contanos brevemente qué está pasando.', 'warning');
+      return;
+    }
+
     setIsBusy(true);
     try {
       const report = await runQuickDiagnostic();
       setDiagnostic(report);
       const deviceName = report.computerName || report.userName || 'Equipo cliente';
       const result = await appBackend.registerClient({
-        pairingCode: clientPairingCode,
+        pairingCode: clientPairingCode.trim(),
         deviceName,
-        issue: clientIssue,
+        issue: clientIssue.trim(),
         computerName: report.computerName,
         userName: report.userName,
         os: report.os,
@@ -342,10 +365,9 @@ function App() {
 
       setSession(result.session);
       setClientDashboard(await appBackend.getClientDashboard(result.session.deviceToken ?? ''));
-      setClientTab('overview');
-      notify(`Equipo registrado: ${result.device.displayName}`, 'ok');
+      notify('Equipo vinculado. Ya podés solicitar asistencia.', 'success');
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'No se pudo registrar el equipo.', 'danger');
+      notify(error instanceof Error ? error.message : 'No se pudo vincular el equipo.', 'danger');
     } finally {
       setIsBusy(false);
     }
@@ -353,7 +375,7 @@ function App() {
 
   async function handleRunDiagnostic() {
     if (!session?.deviceToken) {
-      notify('Registra primero el equipo cliente.', 'warn');
+      notify('Primero vinculá el equipo.', 'warning');
       return;
     }
 
@@ -369,9 +391,9 @@ function App() {
         session.deviceToken
       );
       await refreshClient(session.deviceToken);
-      notify('Diagnostico guardado y sincronizado.', 'ok');
+      notify('Diagnóstico actualizado.', 'success');
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'No se pudo correr el diagnostico.', 'danger');
+      notify(error instanceof Error ? error.message : 'No se pudo ejecutar el diagnóstico.', 'danger');
     } finally {
       setIsBusy(false);
     }
@@ -379,17 +401,24 @@ function App() {
 
   async function handleCreateTicket() {
     if (!session?.deviceToken || !clientDashboard?.device) {
-      notify('Registra el dispositivo antes de crear tickets.', 'warn');
+      notify('Primero vinculá el equipo.', 'warning');
+      return;
+    }
+    if (clientIssue.trim().length < 8) {
+      notify('Describí el problema antes de pedir asistencia.', 'warning');
       return;
     }
 
     setIsBusy(true);
     try {
-      const priority: Priority = clientIssue.toLowerCase().includes('urgente') || clientIssue.toLowerCase().includes('no prende') ? 'alta' : 'normal';
-      const ticket = await appBackend.createTicket(
+      const normalizedIssue = clientIssue.toLowerCase();
+      const priority: Priority = normalizedIssue.includes('urgente') || normalizedIssue.includes('no prende')
+        ? 'alta'
+        : 'normal';
+      const ticketRecord = await appBackend.createTicket(
         {
           deviceId: clientDashboard.device.id,
-          issue: clientIssue,
+          issue: clientIssue.trim(),
           clientName: clientDashboard.device.displayName,
           priority
         },
@@ -398,7 +427,7 @@ function App() {
       const supportSession = await appBackend.createRemoteSession(
         {
           deviceId: clientDashboard.device.id,
-          ticketId: ticket.id
+          ticketId: ticketRecord.id
         },
         session.deviceToken
       );
@@ -409,9 +438,9 @@ function App() {
         instructions: supportSession.instructions
       });
       await refreshClient(session.deviceToken);
-      notify(`Ticket ${ticket.id} creado y listo para remoto.`, 'ok');
+      notify(`Solicitud ${ticketLabel(ticketRecord.id)} creada.`, 'success');
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'No se pudo crear el ticket.', 'danger');
+      notify(error instanceof Error ? error.message : 'No se pudo crear la solicitud.', 'danger');
     } finally {
       setIsBusy(false);
     }
@@ -419,10 +448,9 @@ function App() {
 
   async function handleOpenRemote() {
     try {
-      const message = await openRemoteTool();
-      notify(message, 'neutral');
+      notify(await openRemoteTool(), 'neutral');
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'No se pudo abrir la herramienta remota.', 'danger');
+      notify(error instanceof Error ? error.message : 'No se pudo abrir la asistencia remota.', 'danger');
     }
   }
 
@@ -433,13 +461,13 @@ function App() {
     try {
       const record = await appBackend.generatePairingCode();
       setPairingGenerated(record.code);
-      notify(`Pairing code creado: ${record.code}`, 'ok');
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(record.code);
       }
       await refreshAdmin();
+      notify('Código generado y copiado.', 'success');
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'No se pudo generar el codigo.', 'danger');
+      notify(error instanceof Error ? error.message : 'No se pudo generar el código.', 'danger');
     } finally {
       setIsBusy(false);
     }
@@ -450,7 +478,9 @@ function App() {
     try {
       const result = await appBackend.checkForUpdates(APP_VERSION);
       setUpdateResult(result);
-      notify(result.status === 'available' ? `Update disponible: ${result.nextVersion}` : result.notes, result.status === 'available' ? 'warn' : 'neutral');
+      notify(result.notes, result.status === 'available' ? 'warning' : 'neutral');
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'No se pudo verificar la versión.', 'danger');
     } finally {
       setIsBusy(false);
     }
@@ -460,9 +490,9 @@ function App() {
     try {
       const result = await checkNativeUpdates();
       setUpdateResult(result);
-      notify(result.notes, result.status === 'available' ? 'warn' : 'neutral');
+      notify(result.notes, result.status === 'available' ? 'warning' : 'neutral');
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'No se pudo verificar el updater nativo.', 'danger');
+      notify(error instanceof Error ? error.message : 'No se pudo verificar la actualización.', 'danger');
     }
   }
 
@@ -471,9 +501,9 @@ function App() {
     try {
       const result = await installNativeUpdate((progress) => setUpdateProgress(progress));
       setUpdateResult(result);
-      notify(result.notes, result.status === 'available' ? 'warn' : 'ok');
+      notify(result.notes, result.status === 'available' ? 'warning' : 'success');
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'No se pudo instalar la actualizacion.', 'danger');
+      notify(error instanceof Error ? error.message : 'No se pudo instalar la actualización.', 'danger');
     } finally {
       setIsUpdating(false);
       setUpdateProgress('');
@@ -485,758 +515,727 @@ function App() {
     try {
       const result = await runAgentAction(actionId);
       setAgentResult(result);
-      notify(result.message, result.ok ? 'ok' : 'warn');
+      notify(result.message, result.ok ? 'success' : 'warning');
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'No se pudo ejecutar la accion.', 'danger');
+      notify(error instanceof Error ? error.message : 'No se pudo ejecutar la acción.', 'danger');
     } finally {
       setIsBusy(false);
     }
   }
 
   async function handleRefreshDashboard() {
-    if (!session) {
-      notify('No hay una sesion activa para sincronizar.', 'warn');
-      return;
+    if (!session) return;
+    if (session.role === 'admin') {
+      await refreshAdmin();
+    } else if (session.deviceToken) {
+      await refreshClient(session.deviceToken);
     }
-
-    setIsBusy(true);
-    try {
-      if (session.role === 'admin') {
-        await refreshAdmin();
-      } else if (session.deviceToken) {
-        await refreshClient(session.deviceToken);
-      }
-
-      notify('Panel sincronizado.', 'ok');
-    } catch (error) {
-      notify(error instanceof Error ? error.message : 'No se pudo sincronizar el panel.', 'danger');
-    } finally {
-      setIsBusy(false);
-    }
+    notify('Información actualizada.', 'success');
   }
 
   if (booting) {
-    return (
-      <main className="deck-shell">
-        <div className="industrial-bg" />
-        <div className="scanlines" />
-        <div className="hud-frame" />
-        <section className="center-stage">
-          <div className="line-panel auth-panel">
-            <p className="section-kicker">BOOT</p>
-            <h2>Cargando UnderDock...</h2>
-            <p>Preparando autentificacion, diagnostico y soporte remoto.</p>
-          </div>
-        </section>
-        <VersionBadge />
-      </main>
-    );
+    return <LoadingScreen />;
   }
 
   if (!session) {
     return (
-      <main className="deck-shell">
-        <div className="industrial-bg" />
-        <div className="scanlines" />
-        <div className="hud-frame" />
-
-        <header className="command-bar">
-          <button className="brand-lockup" aria-label="UnderDock inicio">
-            <span className="brand-mark"><i /></span>
-            <span><b>UNDERDOCK</b></span>
-          </button>
-        </header>
-
-        <section className="auth-shell">
-          {updateResult?.status === 'available' && (
-            <section className="line-panel auth-update-banner">
-              <h3>{updateResult.nextVersion}</h3>
-              <p>{isUpdating ? (updateProgress || 'Updating') : 'Ready'}</p>
-              <button className="gold-action full" onClick={handleNativeUpdateInstall} disabled={isBusy || isUpdating}>
-                <ArrowDownToLine size={14} /> {isUpdating ? (updateProgress || 'Updating') : 'Update'}
-              </button>
-            </section>
-          )}
-          <section className="line-panel auth-card auth-card-single">
-            <div className="field-stack">
-              <label>
-                <input
-                  value={clientPairingCode}
-                  onChange={(event) => setClientPairingCode(event.target.value.toUpperCase())}
-                  placeholder={backendConfig.backendKind === 'local' ? 'DEMO-PAIR' : 'CODE'}
-                  autoComplete="one-time-code"
-                />
-              </label>
-            </div>
-            <button className="gold-action full" onClick={handleClientRegister} disabled={isBusy}>
-              <MonitorCog size={14} /> Enter
-            </button>
-            <button className="text-link auth-admin-link" onClick={() => setShowAdminLogin(true)}>
-              Admin
-            </button>
-          </section>
-        </section>
-
-        {showAdminLogin && (
-          <div className="admin-modal-backdrop" role="presentation" onClick={() => setShowAdminLogin(false)}>
-            <section className="line-panel auth-card admin-modal" role="dialog" aria-modal="true" aria-labelledby="admin-login-title" onClick={(event) => event.stopPropagation()}>
-              <div className="field-stack">
-                <label>
-                  <input value={adminEmail} onChange={(event) => setAdminEmail(event.target.value)} placeholder="email" />
-                </label>
-                <label>
-                  <input type="password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} placeholder="password" />
-                </label>
-              </div>
-              <div className="button-row compact-row">
-                <button className="gold-action" onClick={handleAdminSignIn} disabled={isBusy}>
-                  <Lock size={14} /> Go
-                </button>
-                <button className="line-action" onClick={() => setShowAdminLogin(false)} type="button">
-                  Back
-                </button>
-              </div>
-            </section>
-          </div>
-        )}
-
-        {toast && (
-          <ToastBar toast={toast} />
-        )}
-        <VersionBadge />
-      </main>
+      <AuthScreen
+        pairingCode={clientPairingCode}
+        issue={clientIssue}
+        adminEmail={adminEmail}
+        adminPassword={adminPassword}
+        showAdminLogin={showAdminLogin}
+        isBusy={isBusy}
+        updateResult={updateResult}
+        isUpdating={isUpdating}
+        updateProgress={updateProgress}
+        onPairingCodeChange={setClientPairingCode}
+        onIssueChange={setClientIssue}
+        onConnect={handleClientRegister}
+        onOpenAdmin={() => setShowAdminLogin(true)}
+        onCloseAdmin={() => setShowAdminLogin(false)}
+        onAdminEmailChange={setAdminEmail}
+        onAdminPasswordChange={setAdminPassword}
+        onAdminSignIn={handleAdminSignIn}
+        onInstallUpdate={handleNativeUpdateInstall}
+      />
     );
   }
 
   return (
-    <main className="deck-shell">
-      <div className="industrial-bg" />
-      <div className="scanlines" />
-      <div className="hud-frame" />
+    <main className="nexo-app workspace-view">
+      <AmbientBackground />
+      <AppHeader
+        session={session}
+        isBusy={isBusy}
+        onRefresh={handleRefreshDashboard}
+        onSignOut={handleSignOut}
+      />
 
-      <header className="command-bar">
-        <button className="brand-lockup" onClick={handleRefreshDashboard} aria-label="UnderDock inicio">
-          <span className="brand-mark"><i /></span>
-          <span>
-            <b>UNDERDOCK</b>
-            <small>{session.role.toUpperCase()} / {session.backendKind.toUpperCase()}</small>
-          </span>
-        </button>
+      {session.role === 'admin' ? (
+        <AdminWorkspace
+          dashboard={adminDashboard}
+          view={adminView}
+          selectedTicket={selectedTicket}
+          selectedTicketId={selectedTicketId}
+          pairingCode={pairingGenerated || adminDashboard?.pairingCodes[0]?.code || ''}
+          openTicketCount={openTickets.length}
+          updateResult={updateResult}
+          isBusy={isBusy}
+          onViewChange={setAdminView}
+          onSelectTicket={setSelectedTicketId}
+          onGeneratePairingCode={handleGeneratePairingCode}
+          onOpenRemote={handleOpenRemote}
+          onUpdateTicket={async (status) => {
+            if (!selectedTicket) return;
+            setIsBusy(true);
+            try {
+              await appBackend.updateTicketStatus(selectedTicket.id, status);
+              await refreshAdmin();
+              notify(`Solicitud ${ticketLabel(selectedTicket.id)} actualizada.`, 'success');
+            } catch (error) {
+              notify(error instanceof Error ? error.message : 'No se pudo actualizar la solicitud.', 'danger');
+            } finally {
+              setIsBusy(false);
+            }
+          }}
+          onCheckUpdates={handleUpdateCheck}
+          onNativeUpdateCheck={handleNativeUpdateCheck}
+        />
+      ) : (
+        <ClientWorkspace
+          dashboard={clientDashboard}
+          issue={clientIssue}
+          diagnostic={diagnostic}
+          remoteSession={remoteSession}
+          agentStatus={agentStatus}
+          agentResult={agentResult}
+          updateResult={updateResult}
+          isBusy={isBusy}
+          isUpdating={isUpdating}
+          updateProgress={updateProgress}
+          onIssueChange={setClientIssue}
+          onCreateTicket={handleCreateTicket}
+          onRunDiagnostic={handleRunDiagnostic}
+          onOpenRemote={handleOpenRemote}
+          onCheckUpdates={handleNativeUpdateCheck}
+          onInstallUpdate={handleNativeUpdateInstall}
+          onAgentAction={handleAgentAction}
+        />
+      )}
 
-        <nav className="top-nav">
-          {session.role === 'admin' ? (
-            <>
-              <button className={adminTab === 'queue' ? 'active' : ''} onClick={() => setAdminTab('queue')}>QUEUE</button>
-              <button className={adminTab === 'devices' ? 'active' : ''} onClick={() => setAdminTab('devices')}>DEVICES</button>
-              <button className={adminTab === 'releases' ? 'active' : ''} onClick={() => setAdminTab('releases')}>RELEASES</button>
-            </>
-          ) : (
-            <>
-              <button className={clientTab === 'overview' ? 'active' : ''} onClick={() => setClientTab('overview')}>OVERVIEW</button>
-              <button className={clientTab === 'ticket' ? 'active' : ''} onClick={() => setClientTab('ticket')}>TICKET</button>
-              <button className={clientTab === 'maintenance' ? 'active' : ''} onClick={() => setClientTab('maintenance')}>MAINT</button>
-            </>
-          )}
-        </nav>
-
-        <div className="mode-switch">
-          <button className="active" onClick={handleRefreshDashboard}>REFRESH</button>
-          <button onClick={handleSignOut}>SALIR</button>
-        </div>
-      </header>
-
-      <section className="content-stage compact-stage">
-        <div className="stage-toolbar">
-          <div className="stage-tabs">
-            {session.role === 'admin' ? (
-              <>
-                <button className={adminTab === 'queue' ? 'active' : ''} onClick={() => setAdminTab('queue')}>1</button>
-                <button className={adminTab === 'devices' ? 'active' : ''} onClick={() => setAdminTab('devices')}>2</button>
-                <button className={adminTab === 'releases' ? 'active' : ''} onClick={() => setAdminTab('releases')}>3</button>
-              </>
-            ) : (
-              <>
-                <button className={clientTab === 'overview' ? 'active' : ''} onClick={() => setClientTab('overview')}>1</button>
-                <button className={clientTab === 'ticket' ? 'active' : ''} onClick={() => setClientTab('ticket')}>2</button>
-                <button className={clientTab === 'maintenance' ? 'active' : ''} onClick={() => setClientTab('maintenance')}>3</button>
-              </>
-            )}
-          </div>
-          <div className="stage-actions">
-            <button className="gold-action" onClick={session.role === 'admin' ? handleGeneratePairingCode : handleCreateTicket} disabled={isBusy}>
-              {session.role === 'admin' ? 'Code' : 'Ticket'}
-            </button>
-            <button className="line-action" onClick={session.role === 'admin' ? handleOpenRemote : handleRunDiagnostic} disabled={isBusy}>
-              {session.role === 'admin' ? 'Remote' : 'Diag'}
-            </button>
-          </div>
-        </div>
-
-        {session.role === 'admin' ? (
-          <MinimalAdminPanel
-            dashboard={adminDashboard}
-            activeTab={adminTab}
-            selectedTicket={selectedTicket}
-            selectedTicketId={selectedTicketId}
-            onSelectTicket={setSelectedTicketId}
-            pairingCode={pairingGenerated || adminDashboard?.pairingCodes[0]?.code || ''}
-            onOpenRemote={handleOpenRemote}
-            onUpdateTicket={async (status) => {
-              if (!selectedTicket) return;
-              setIsBusy(true);
-              try {
-                await appBackend.updateTicketStatus(selectedTicket.id, status);
-                await refreshAdmin();
-                notify(`Ticket ${selectedTicket.id} -> ${status}`, 'ok');
-              } catch (error) {
-                notify(error instanceof Error ? error.message : 'No se pudo actualizar el ticket.', 'danger');
-              } finally {
-                setIsBusy(false);
-              }
-            }}
-            onCheckUpdates={handleUpdateCheck}
-            onNativeUpdateCheck={handleNativeUpdateCheck}
-          />
-        ) : (
-          <MinimalClientPanel
-            dashboard={clientDashboard}
-            activeTab={clientTab}
-            issue={clientIssue}
-            setIssue={setClientIssue}
-            diagnostic={diagnostic}
-            remoteSession={remoteSession}
-            agentStatus={agentStatus}
-            agentResult={agentResult}
-            updateResult={updateResult}
-            onRunDiagnostic={handleRunDiagnostic}
-            onCreateTicket={handleCreateTicket}
-            onOpenRemote={handleOpenRemote}
-            onCheckUpdates={handleUpdateCheck}
-            onAgentAction={handleAgentAction}
-          />
-        )}
-      </section>
-
-      {toast && <ToastBar toast={toast} />}
-      <VersionBadge />
+      {toast && <ToastBar toast={toast} onClose={() => setToast(null)} />}
+      <div className="version-chip">NEXO Support · v{APP_VERSION}</div>
     </main>
   );
 }
 
-function VersionBadge() {
+function AmbientBackground() {
   return (
-    <div className="version-badge" aria-label={`Version ${APP_VERSION}`}>
-      v{APP_VERSION}
+    <div className="ambient" aria-hidden="true">
+      <div className="ambient-orb ambient-orb-one" />
+      <div className="ambient-orb ambient-orb-two" />
+      <div className="ambient-grid" />
     </div>
   );
 }
 
-function StatusRail({
-  backendKind,
-  orgName,
-  ticketCount,
-  deviceCount,
-  updateResult
-}: {
-  backendKind: string;
-  orgName: string;
-  ticketCount: number;
-  deviceCount: number;
-  updateResult: UpdateResult | null;
-}) {
+function Brand({ dark = false }: { dark?: boolean }) {
   return (
-    <aside className="status-rail">
-      <div className="rail-cell">
-        <span>BACKEND</span>
-        <strong>{backendKind.toUpperCase()}</strong>
-      </div>
-      <div className="rail-cell">
-        <span>ORG</span>
-        <strong>{orgName}</strong>
-      </div>
-      <div className="rail-cell">
-        <span>TICKETS</span>
-        <strong>{ticketCount}</strong>
-      </div>
-      <div className="rail-cell">
-        <span>DEVICES</span>
-        <strong>{deviceCount}</strong>
-      </div>
-      <div className="rail-cell wide">
-        <span>UPDATES</span>
-        <strong>{updateResult?.status?.toUpperCase() ?? 'PENDING'}</strong>
-      </div>
-    </aside>
+    <div className={`nexo-brand ${dark ? 'dark' : ''}`} aria-label="NEXO Support">
+      <span className="brand-word">NE</span>
+      <svg className="brand-x" viewBox="0 0 32 28" aria-hidden="true">
+        <defs>
+          <linearGradient id="nexo-gradient" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#7a3cff" />
+            <stop offset="1" stopColor="#188fff" />
+          </linearGradient>
+        </defs>
+        <path d="M4 3L15.5 14L4 25" fill="none" stroke="url(#nexo-gradient)" strokeWidth="5.2" strokeLinecap="square" />
+        <path d="M28 3L16.5 14L28 25" fill="none" stroke="url(#nexo-gradient)" strokeWidth="5.2" strokeLinecap="square" />
+      </svg>
+      <span className="brand-word">O</span>
+      <span className="brand-product">Support</span>
+    </div>
   );
 }
 
-function MinimalAdminPanel({
-  dashboard,
-  activeTab,
-  selectedTicket,
-  selectedTicketId,
-  onSelectTicket,
-  pairingCode,
-  onOpenRemote,
-  onUpdateTicket,
-  onCheckUpdates,
-  onNativeUpdateCheck
+function LoadingScreen() {
+  return (
+    <main className="nexo-app loading-view">
+      <AmbientBackground />
+      <div className="loading-card">
+        <Brand />
+        <div className="loading-line"><span /></div>
+        <p>Preparando una conexión segura.</p>
+      </div>
+    </main>
+  );
+}
+
+type AuthScreenProps = {
+  pairingCode: string;
+  issue: string;
+  adminEmail: string;
+  adminPassword: string;
+  showAdminLogin: boolean;
+  isBusy: boolean;
+  updateResult: UpdateResult | null;
+  isUpdating: boolean;
+  updateProgress: string;
+  onPairingCodeChange: (value: string) => void;
+  onIssueChange: (value: string) => void;
+  onConnect: () => void;
+  onOpenAdmin: () => void;
+  onCloseAdmin: () => void;
+  onAdminEmailChange: (value: string) => void;
+  onAdminPasswordChange: (value: string) => void;
+  onAdminSignIn: () => void;
+  onInstallUpdate: () => void;
+};
+
+function AuthScreen(props: AuthScreenProps) {
+  return (
+    <main className="nexo-app auth-view">
+      <AmbientBackground />
+      <header className="public-header">
+        <Brand />
+        <button className="quiet-button" onClick={props.onOpenAdmin}>
+          <LockKeyhole size={15} /> Acceso técnico
+        </button>
+      </header>
+
+      <section className="auth-layout">
+        <div className="auth-copy">
+          <span className="eyebrow">Soporte técnico NEXO</span>
+          <h1>Tu equipo vuelve a funcionar, <span>sin vueltas.</span></h1>
+          <p>
+            Vinculá esta computadora con el código que te dio el técnico. NEXO revisa el estado del sistema y deja todo listo para asistirte.
+          </p>
+          <div className="trust-row">
+            <span><ShieldCheck size={17} /> Acceso autorizado</span>
+            <span><Clock3 size={17} /> Diagnóstico rápido</span>
+            <span><Laptop size={17} /> Hecho para Windows</span>
+          </div>
+        </div>
+
+        <section className="auth-card surface-card">
+          <div className="card-heading">
+            <span className="step-number">01</span>
+            <div>
+              <h2>Solicitar asistencia</h2>
+              <p>Dos datos y el equipo queda vinculado.</p>
+            </div>
+          </div>
+
+          <label className="field-label">
+            <span>Código de acceso</span>
+            <input
+              value={props.pairingCode}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => props.onPairingCodeChange(event.target.value.toUpperCase())}
+              placeholder="EJ: NEXO-82F4"
+              autoComplete="one-time-code"
+            />
+          </label>
+
+          <label className="field-label">
+            <span>¿Qué está pasando?</span>
+            <textarea
+              value={props.issue}
+              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => props.onIssueChange(event.target.value)}
+              placeholder="Ej: La computadora tarda mucho en iniciar y se congela."
+            />
+          </label>
+
+          <button className="primary-button full" onClick={props.onConnect} disabled={props.isBusy}>
+            {props.isBusy ? <RefreshCw className="spin" size={18} /> : <ArrowRight size={18} />}
+            {props.isBusy ? 'Revisando el equipo…' : 'Conectar con NEXO'}
+          </button>
+
+          <p className="privacy-note">
+            El diagnóstico se ejecuta cuando lo pedís. NEXO no mantiene monitoreo oculto.
+          </p>
+
+          {props.updateResult?.status === 'available' && (
+            <div className="update-inline">
+              <div>
+                <strong>Nueva versión {props.updateResult.nextVersion}</strong>
+                <span>{props.isUpdating ? props.updateProgress || 'Instalando…' : 'Lista para instalar'}</span>
+              </div>
+              <button onClick={props.onInstallUpdate} disabled={props.isUpdating}>
+                <ArrowDownToLine size={16} /> Actualizar
+              </button>
+            </div>
+          )}
+        </section>
+      </section>
+
+      <footer className="public-footer">
+        <span>NEXO · Transformación digital</span>
+        <span>v{APP_VERSION}</span>
+      </footer>
+
+      {props.showAdminLogin && (
+        <div className="modal-backdrop" onClick={props.onCloseAdmin} role="presentation">
+          <section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="admin-title" onClick={(event: MouseEvent<HTMLElement>) => event.stopPropagation()}>
+            <button className="modal-close" onClick={props.onCloseAdmin} aria-label="Cerrar">
+              <X size={18} />
+            </button>
+            <span className="eyebrow">Panel privado</span>
+            <h2 id="admin-title">Acceso técnico</h2>
+            <p>Ingresá con la cuenta del equipo de soporte.</p>
+
+            <label className="field-label">
+              <span>Correo</span>
+              <input
+                value={props.adminEmail}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => props.onAdminEmailChange(event.target.value)}
+                placeholder="tecnico@nexo.com"
+                autoComplete="username"
+              />
+            </label>
+            <label className="field-label">
+              <span>Contraseña</span>
+              <input
+                type="password"
+                value={props.adminPassword}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => props.onAdminPasswordChange(event.target.value)}
+                placeholder="••••••••"
+                autoComplete="current-password"
+                onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+                  if (event.key === 'Enter') props.onAdminSignIn();
+                }}
+              />
+            </label>
+            <button className="primary-button full" onClick={props.onAdminSignIn} disabled={props.isBusy}>
+              <LockKeyhole size={17} /> {props.isBusy ? 'Ingresando…' : 'Entrar al panel'}
+            </button>
+          </section>
+        </div>
+      )}
+    </main>
+  );
+}
+
+function AppHeader({
+  session,
+  isBusy,
+  onRefresh,
+  onSignOut
 }: {
+  session: AppSession;
+  isBusy: boolean;
+  onRefresh: () => void;
+  onSignOut: () => void;
+}) {
+  return (
+    <header className="app-header">
+      <Brand />
+      <div className="header-context">
+        <span className="status-dot" />
+        <span>{session.role === 'admin' ? 'Panel técnico' : 'Equipo conectado'}</span>
+      </div>
+      <div className="header-actions">
+        <button className="icon-button" onClick={onRefresh} disabled={isBusy} aria-label="Actualizar">
+          <RefreshCw className={isBusy ? 'spin' : ''} size={17} />
+        </button>
+        <button className="quiet-button" onClick={onSignOut}>
+          <LogOut size={16} /> Salir
+        </button>
+      </div>
+    </header>
+  );
+}
+
+type AdminWorkspaceProps = {
   dashboard: AdminDashboard | null;
-  activeTab: AdminTab;
+  view: AdminView;
   selectedTicket?: TicketRecord;
   selectedTicketId: string;
-  onSelectTicket: (ticketId: string) => void;
   pairingCode: string;
+  openTicketCount: number;
+  updateResult: UpdateResult | null;
+  isBusy: boolean;
+  onViewChange: (view: AdminView) => void;
+  onSelectTicket: (ticketId: string) => void;
+  onGeneratePairingCode: () => void;
   onOpenRemote: () => void;
   onUpdateTicket: (status: TicketStatus) => void;
   onCheckUpdates: () => void;
   onNativeUpdateCheck: () => void;
-}) {
-  const selectedDevice = dashboard?.devices.find((device) => device.id === selectedTicket?.deviceId);
-  const activeTicket = selectedTicket ?? dashboard?.tickets[0];
+};
+
+function AdminWorkspace(props: AdminWorkspaceProps) {
+  const selectedDevice = props.dashboard?.devices.find((device) => device.id === props.selectedTicket?.deviceId);
+  const activeDevices = props.dashboard?.devices.filter((device) => device.status !== 'idle').length ?? 0;
 
   return (
-    <div className="single-column">
-      <section className="line-panel compact-panel">
-        <div className="button-row compact-row">
-          <button className="gold-action" onClick={onCheckUpdates}>Check</button>
-          <button className="line-action" onClick={onNativeUpdateCheck}>Native</button>
-          <button className="line-action" onClick={onOpenRemote}>Remote</button>
+    <div className="workspace-shell admin-shell">
+      <aside className="sidebar">
+        <div className="sidebar-section">
+          <span className="sidebar-label">Gestión</span>
+          <button className={props.view === 'requests' ? 'active' : ''} onClick={() => props.onViewChange('requests')}>
+            <Ticket size={18} /> Solicitudes <b>{props.openTicketCount}</b>
+          </button>
+          <button className={props.view === 'devices' ? 'active' : ''} onClick={() => props.onViewChange('devices')}>
+            <Monitor size={18} /> Equipos <b>{props.dashboard?.devices.length ?? 0}</b>
+          </button>
+          <button className={props.view === 'releases' ? 'active' : ''} onClick={() => props.onViewChange('releases')}>
+            <Server size={18} /> Versiones
+          </button>
         </div>
-        <div className="compact-code" onClick={() => pairingCode && navigator.clipboard?.writeText?.(pairingCode)}>
-          {pairingCode || '----'}
-        </div>
-      </section>
 
-      {activeTab === 'queue' && (
-        <section className="line-panel compact-panel">
-          <div className="compact-list">
-            {(dashboard?.tickets ?? []).map((ticket) => (
-              <button key={ticket.id} className={`compact-item ${ticket.id === selectedTicketId ? 'active' : ''}`} onClick={() => onSelectTicket(ticket.id)}>
-                <span>{ticket.id}</span>
-                <small>{ticket.status}</small>
-              </button>
-            ))}
+        <div className="pairing-card">
+          <span className="sidebar-label">Nuevo acceso</span>
+          <strong>{props.pairingCode || '— — — —'}</strong>
+          <p>Válido por 30 minutos. Se copia automáticamente.</p>
+          <button className="secondary-button full" onClick={props.onGeneratePairingCode} disabled={props.isBusy}>
+            <Clipboard size={16} /> Generar código
+          </button>
+        </div>
+      </aside>
+
+      <section className="workspace-main">
+        <div className="workspace-title-row">
+          <div>
+            <span className="eyebrow">Centro de soporte</span>
+            <h1>{props.view === 'requests' ? 'Solicitudes' : props.view === 'devices' ? 'Equipos' : 'Versiones'}</h1>
           </div>
-        </section>
-      )}
-
-      {activeTab === 'devices' && (
-        <section className="line-panel compact-panel">
-          <div className="compact-list">
-            {(dashboard?.devices ?? []).map((device) => (
-              <button key={device.id} className="compact-item" type="button">
-                <span>{device.displayName}</span>
-                <small>{device.status}</small>
-              </button>
-            ))}
+          <div className="summary-strip">
+            <div><span>Abiertas</span><strong>{props.openTicketCount}</strong></div>
+            <div><span>Activos</span><strong>{activeDevices}</strong></div>
+            <div><span>Backend</span><strong>{props.dashboard ? 'Online' : '—'}</strong></div>
           </div>
-        </section>
-      )}
+        </div>
 
-      {activeTab === 'releases' && (
-        <section className="line-panel compact-panel">
-          <div className="compact-list">
-            {(dashboard?.releases ?? []).map((release) => (
-              <button key={release.id} className="compact-item" type="button">
-                <span>{release.version}</span>
-                <small>{release.isActive ? 'live' : 'off'}</small>
-              </button>
-            ))}
+        {props.view === 'requests' && (
+          <div className="request-layout">
+            <section className="surface-card request-list-card">
+              <div className="section-heading">
+                <div>
+                  <h2>Cola actual</h2>
+                  <p>Ordenada por actividad reciente.</p>
+                </div>
+                <Activity size={19} />
+              </div>
+              <div className="request-list">
+                {(props.dashboard?.tickets ?? []).length === 0 && <EmptyState text="No hay solicitudes todavía." />}
+                {(props.dashboard?.tickets ?? []).map((ticketItem) => (
+                  <button
+                    key={ticketItem.id}
+                    className={`request-row ${ticketItem.id === props.selectedTicketId ? 'active' : ''}`}
+                    onClick={() => props.onSelectTicket(ticketItem.id)}
+                  >
+                    <div className="request-row-top">
+                      <strong>{ticketLabel(ticketItem.id)}</strong>
+                      <StatusPill label={statusLabel(ticketItem.status)} tone={statusTone(ticketItem.status)} />
+                    </div>
+                    <span className="request-client">{ticketItem.clientName}</span>
+                    <p>{ticketItem.issue}</p>
+                    <small>{formatDate(ticketItem.updatedAt)}</small>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="surface-card request-detail-card">
+              {props.selectedTicket ? (
+                <>
+                  <div className="detail-head">
+                    <div>
+                      <span className="eyebrow">{ticketLabel(props.selectedTicket.id)}</span>
+                      <h2>{props.selectedTicket.clientName}</h2>
+                    </div>
+                    <StatusPill label={statusLabel(props.selectedTicket.status)} tone={statusTone(props.selectedTicket.status)} />
+                  </div>
+
+                  <div className="issue-box">
+                    <span>Problema informado</span>
+                    <p>{props.selectedTicket.issue}</p>
+                  </div>
+
+                  <div className="detail-grid">
+                    <InfoLine label="Equipo" value={selectedDevice?.displayName ?? 'Sin vincular'} />
+                    <InfoLine label="Sistema" value={selectedDevice?.os ?? 'Sin datos'} />
+                    <InfoLine label="Prioridad" value={props.selectedTicket.priority === 'alta' ? 'Alta' : 'Normal'} />
+                    <InfoLine label="Último cambio" value={formatDate(props.selectedTicket.updatedAt)} />
+                  </div>
+
+                  <div className="detail-actions">
+                    <button className="primary-button" onClick={() => props.onUpdateTicket('en-remoto')} disabled={props.isBusy}>
+                      <Zap size={17} /> Iniciar asistencia
+                    </button>
+                    <button className="secondary-button" onClick={props.onOpenRemote}>
+                      <Wrench size={17} /> Abrir remoto
+                    </button>
+                  </div>
+
+                  <div className="status-actions">
+                    <span>Cambiar estado</span>
+                    <button onClick={() => props.onUpdateTicket('nuevo')}>Nueva</button>
+                    <button onClick={() => props.onUpdateTicket('esperando')}>En espera</button>
+                    <button onClick={() => props.onUpdateTicket('cerrado')}>Resolver</button>
+                  </div>
+                </>
+              ) : (
+                <EmptyState text="Seleccioná una solicitud para ver el detalle." />
+              )}
+            </section>
           </div>
-        </section>
-      )}
+        )}
 
-      <section className="line-panel compact-panel">
-        <div className="button-row compact-row">
-          <button className="gold-action" onClick={() => activeTicket && onUpdateTicket('en-remoto')} disabled={!activeTicket}>Live</button>
-          <button className="line-action" onClick={() => activeTicket && onUpdateTicket('esperando')} disabled={!activeTicket}>Hold</button>
-          <button className="line-action" onClick={() => activeTicket && onUpdateTicket('cerrado')} disabled={!activeTicket}>Close</button>
-        </div>
-        <div className="compact-meta">
-          <span>{activeTicket?.id ?? '-'}</span>
-          <span>{selectedDevice?.displayName ?? '-'}</span>
-        </div>
+        {props.view === 'devices' && (
+          <section className="surface-card table-card">
+            <div className="section-heading">
+              <div><h2>Equipos vinculados</h2><p>Estado y última conexión.</p></div>
+              <Users size={19} />
+            </div>
+            <div className="data-table">
+              <div className="table-head"><span>Equipo</span><span>Sistema</span><span>Estado</span><span>Última conexión</span></div>
+              {(props.dashboard?.devices ?? []).map((device) => (
+                <div className="table-row" key={device.id}>
+                  <span><strong>{device.displayName}</strong><small>{device.computerName}</small></span>
+                  <span>{device.os}</span>
+                  <span><StatusPill label={device.status === 'idle' ? 'Disponible' : device.status === 'waiting' ? 'Esperando' : device.status === 'en-remoto' ? 'En asistencia' : 'Mantenimiento'} tone={device.status === 'idle' ? 'green' : 'blue'} /></span>
+                  <span>{formatDate(device.lastSeenAt)}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {props.view === 'releases' && (
+          <section className="surface-card releases-card">
+            <div className="section-heading">
+              <div><h2>Distribución</h2><p>Versiones disponibles para los equipos.</p></div>
+              <div className="inline-actions">
+                <button className="secondary-button" onClick={props.onCheckUpdates}><RefreshCw size={16} /> Backend</button>
+                <button className="secondary-button" onClick={props.onNativeUpdateCheck}><ArrowDownToLine size={16} /> Updater</button>
+              </div>
+            </div>
+            <div className="release-current">
+              <span>Estado del updater</span>
+              <strong>{props.updateResult?.status === 'available' ? `Disponible ${props.updateResult.nextVersion}` : props.updateResult?.notes ?? 'Sin verificar'}</strong>
+            </div>
+            <div className="release-list">
+              {(props.dashboard?.releases ?? []).map((release) => (
+                <article key={release.id}>
+                  <div><strong>v{release.version}</strong><StatusPill label={release.isActive ? 'Activa' : 'Inactiva'} tone={release.isActive ? 'green' : 'muted'} /></div>
+                  <p>{release.notes}</p>
+                  <small>{formatDate(release.publishedAt)} · {release.channel}</small>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
       </section>
     </div>
   );
 }
 
-function MinimalClientPanel({
-  dashboard,
-  activeTab,
-  issue,
-  setIssue,
-  diagnostic,
-  remoteSession,
-  agentStatus,
-  agentResult,
-  updateResult,
-  onRunDiagnostic,
-  onCreateTicket,
-  onOpenRemote,
-  onCheckUpdates,
-  onAgentAction
-}: {
+type ClientWorkspaceProps = {
   dashboard: ClientDashboard | null;
-  activeTab: ClientTab;
   issue: string;
-  setIssue: (value: string) => void;
   diagnostic: DiagnosticReport | null;
   remoteSession: RemoteSession | null;
   agentStatus: AgentStatus | null;
   agentResult: AgentActionResult | null;
   updateResult: UpdateResult | null;
-  onRunDiagnostic: () => void;
+  isBusy: boolean;
+  isUpdating: boolean;
+  updateProgress: string;
+  onIssueChange: (value: string) => void;
   onCreateTicket: () => void;
-  onOpenRemote: () => void;
-  onCheckUpdates: () => void;
-  onAgentAction: (actionId: string) => void;
-}) {
-  const latestTicket = dashboard?.tickets[0];
-  const latestDiagnostic = dashboard?.diagnostics[0];
-  const release = dashboard?.latestRelease ?? null;
-  const latestDiagnosticPayload = latestDiagnostic?.payload as Partial<DiagnosticReport> | undefined;
-  const thermalReport = diagnostic ?? latestDiagnosticPayload ?? null;
-  const thermalLabel = thermalReport?.maxTemperatureC ?? null;
-
-  return (
-    <div className="single-column">
-      {activeTab === 'overview' && (
-        <section className="line-panel compact-panel">
-          <div className="compact-list">
-            <div className="compact-item static"><span>{dashboard?.device.displayName ?? '-'}</span><small>{dashboard?.device.status ?? '-'}</small></div>
-            <div className="compact-item static"><span>{latestTicket?.id ?? '-'}</span><small>{release?.version ?? '-'}</small></div>
-            <div className="compact-item static"><span>{thermalLabel != null ? `${thermalLabel.toFixed(1)}°` : '-'}</span><small>{updateResult?.status ?? '-'}</small></div>
-          </div>
-        </section>
-      )}
-
-      {activeTab === 'ticket' && (
-        <section className="line-panel compact-panel">
-          <textarea value={issue} onChange={(event) => setIssue(event.target.value)} placeholder="issue" />
-          <div className="button-row compact-row">
-            <button className="gold-action" onClick={onCreateTicket}>Ticket</button>
-            <button className="line-action" onClick={onCheckUpdates}>Update</button>
-            <button className="line-action" onClick={onOpenRemote}>Remote</button>
-          </div>
-          <div className="compact-meta">
-            <span>{remoteSession?.code ?? latestTicket?.remoteCode ?? '-'}</span>
-          </div>
-        </section>
-      )}
-
-      {activeTab === 'maintenance' && (
-        <section className="line-panel compact-panel">
-          <div className="button-row compact-grid">
-            <button className="matrix-action" onClick={() => onAgentAction('temp_scan')}>Temp</button>
-            <button className="matrix-action" onClick={() => onAgentAction('startup_review')}>Start</button>
-            <button className="matrix-action" onClick={() => onAgentAction('windows_update')}>Win</button>
-            <button className="matrix-action" onClick={() => onAgentAction('defender_status')}>Def</button>
-            <button className="matrix-action" onClick={() => onAgentAction('thermal_status')}>Therm</button>
-          </div>
-          <div className="compact-meta">
-            <span>{agentStatus?.mode ?? '-'}</span>
-            <span>{agentResult?.message ?? '-'}</span>
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
-function AdminWorkspace({
-  dashboard,
-  activeTab,
-  selectedTicket,
-  selectedTicketId,
-  onSelectTicket,
-  pairingCode,
-  onOpenRemote,
-  onUpdateTicket,
-  onCheckUpdates,
-  onNativeUpdateCheck
-}: {
-  dashboard: AdminDashboard | null;
-  activeTab: AdminTab;
-  selectedTicket?: TicketRecord;
-  selectedTicketId: string;
-  onSelectTicket: (ticketId: string) => void;
-  pairingCode: string;
-  onOpenRemote: () => void;
-  onUpdateTicket: (status: TicketStatus) => void;
-  onCheckUpdates: () => void;
-  onNativeUpdateCheck: () => void;
-}) {
-  const selectedDevice = dashboard?.devices.find((device) => device.id === selectedTicket?.deviceId);
-  const selectedDeviceDiagnostic = dashboard?.diagnostics.find((diagnostic) => diagnostic.deviceId === selectedTicket?.deviceId);
-  const latestRelease = dashboard?.releases[0];
-  const adminThermal = readThermalMax(selectedDeviceDiagnostic?.payload);
-
-  return (
-    <div className="stage-grid admin-grid">
-      <section className="line-panel main-copy">
-        <p className="section-kicker">ADMIN DECK</p>
-        <h2>Cola central, pairing code y control remoto.</h2>
-        <p>
-          El backend guarda tickets, diagnosticos y releases. Desde este panel generas el codigo de acceso, revisas la cola
-          y cambias el estado del trabajo sin depender de la PC del cliente.
-        </p>
-        <div className="button-row">
-          <button className="gold-action" onClick={onCheckUpdates}><ArrowDownToLine size={14} /> Check updates</button>
-          <button className="line-action" onClick={onNativeUpdateCheck}><RefreshCw size={14} /> Plugin updater</button>
-        </div>
-      </section>
-
-      <section className="line-panel alert-panel">
-        <p className="section-kicker">PAIRING</p>
-        <div className="big-number">{pairingCode || '-----'}</div>
-        <span>codigo de enrolamiento</span>
-        <button className="line-action full" onClick={onOpenRemote}>
-          <Wrench size={14} /> Abrir remoto
-        </button>
-      </section>
-
-      <section className="thin-readout">
-        <DataLine label="Ticket activo" value={selectedTicket?.id ?? '—'} />
-        <DataLine label="Cliente" value={selectedTicket?.clientName ?? '—'} />
-        <DataLine label="Equipo" value={selectedDevice?.displayName ?? '—'} />
-        <DataLine label="Estado" value={selectedTicket?.status.toUpperCase() ?? '—'} />
-        <DataLine label="Release" value={latestRelease?.version ?? '—'} />
-        <DataLine label="Temp max" value={adminThermal != null ? `${adminThermal.toFixed(1)} °C` : '—'} muted={adminThermal == null} />
-      </section>
-
-      {activeTab === 'queue' && (
-        <section className="line-panel queue-panel">
-          <p className="section-kicker">QUEUE</p>
-          <div className="ticket-list">
-            {(dashboard?.tickets ?? []).map((ticket) => (
-              <TicketRow key={ticket.id} ticket={ticket} selected={ticket.id === selectedTicketId} onSelect={onSelectTicket} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {activeTab === 'devices' && (
-        <section className="line-panel device-panel">
-          <p className="section-kicker">DEVICES</p>
-          <div className="device-stack">
-            {(dashboard?.devices ?? []).map((device) => (
-              <div key={device.id} className="device-card">
-                <strong>{device.displayName}</strong>
-                <small>{device.computerName} · {device.userName}</small>
-                <span>{device.status.toUpperCase()}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {activeTab === 'releases' && (
-        <section className="line-panel release-panel">
-          <p className="section-kicker">RELEASES</p>
-          <div className="release-stack">
-            {(dashboard?.releases ?? []).map((release) => (
-              <div key={release.id} className="release-card">
-                <strong>{release.version}</strong>
-                <small>{release.notes}</small>
-                <span>{release.manifestUrl}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <section className="line-panel ticket-detail">
-        <p className="section-kicker">ACTIVE TICKET</p>
-        <h2>{selectedTicket?.id ?? 'Sin ticket'}</h2>
-        <p>{selectedTicket?.issue ?? 'Selecciona un ticket de la cola.'}</p>
-        <div className="button-row">
-          <button className="gold-action" onClick={() => onUpdateTicket('en-remoto')} disabled={!selectedTicket}><Check size={14} /> En remoto</button>
-          <button className="line-action" onClick={() => onUpdateTicket('esperando')} disabled={!selectedTicket}>Esperando</button>
-          <button className="line-action" onClick={() => onUpdateTicket('cerrado')} disabled={!selectedTicket}>Cerrar</button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function ClientWorkspace({
-  dashboard,
-  activeTab,
-  issue,
-  setIssue,
-  diagnostic,
-  remoteSession,
-  agentStatus,
-  agentResult,
-  updateResult,
-  onRunDiagnostic,
-  onCreateTicket,
-  onOpenRemote,
-  onCheckUpdates,
-  onAgentAction
-}: {
-  dashboard: ClientDashboard | null;
-  activeTab: ClientTab;
-  issue: string;
-  setIssue: (value: string) => void;
-  diagnostic: DiagnosticReport | null;
-  remoteSession: RemoteSession | null;
-  agentStatus: AgentStatus | null;
-  agentResult: AgentActionResult | null;
-  updateResult: UpdateResult | null;
   onRunDiagnostic: () => void;
-  onCreateTicket: () => void;
   onOpenRemote: () => void;
   onCheckUpdates: () => void;
+  onInstallUpdate: () => void;
   onAgentAction: (actionId: string) => void;
+};
+
+function ClientWorkspace(props: ClientWorkspaceProps) {
+  const latestTicket = props.dashboard?.tickets[0];
+  const latestDiagnostic = props.dashboard?.diagnostics[0]?.payload as Partial<DiagnosticReport> | undefined;
+  const report = props.diagnostic ?? latestDiagnostic ?? null;
+  const diskTotal = typeof report?.systemDriveTotalGb === 'number' ? report.systemDriveTotalGb : null;
+  const diskFree = typeof report?.systemDriveFreeGb === 'number' ? report.systemDriveFreeGb : null;
+  const ramTotal = typeof report?.ramTotalGb === 'number' ? report.ramTotalGb : null;
+  const ramFree = typeof report?.ramFreeGb === 'number' ? report.ramFreeGb : null;
+  const diskFreePercent = diskTotal && diskFree != null
+    ? Math.round((diskFree / diskTotal) * 100)
+    : null;
+  const ramUsagePercent = ramTotal && ramFree != null
+    ? Math.round(((ramTotal - ramFree) / ramTotal) * 100)
+    : null;
+  const remoteCode = props.remoteSession?.code ?? latestTicket?.remoteCode;
+  const updateAvailable = props.updateResult?.status === 'available';
+
+  return (
+    <div className="workspace-shell client-shell">
+      <section className="workspace-main client-main">
+        <div className="client-hero">
+          <div>
+            <span className="eyebrow">{props.dashboard?.device.displayName ?? 'Equipo vinculado'}</span>
+            <h1>{latestTicket && latestTicket.status !== 'cerrado' ? 'Tu solicitud está en curso.' : '¿En qué te ayudamos?'}</h1>
+            <p>
+              {latestTicket && latestTicket.status !== 'cerrado'
+                ? `El equipo NEXO ya tiene el caso ${ticketLabel(latestTicket.id)} y puede continuar desde acá.`
+                : 'Describí el problema y NEXO prepara el diagnóstico y la conexión remota.'}
+            </p>
+          </div>
+          {latestTicket && (
+            <div className="hero-status">
+              <StatusPill label={statusLabel(latestTicket.status)} tone={statusTone(latestTicket.status)} />
+              <strong>{ticketLabel(latestTicket.id)}</strong>
+              <small>Actualizado {formatDate(latestTicket.updatedAt)}</small>
+            </div>
+          )}
+        </div>
+
+        <div className="client-grid">
+          <section className="surface-card support-card">
+            <div className="section-heading">
+              <div><h2>Asistencia</h2><p>Contanos qué necesitás resolver.</p></div>
+              <Ticket size={19} />
+            </div>
+            <label className="field-label">
+              <span>Descripción del problema</span>
+              <textarea
+                value={props.issue}
+                onChange={(event: ChangeEvent<HTMLTextAreaElement>) => props.onIssueChange(event.target.value)}
+                placeholder="Ej: Se congela al abrir programas y el ventilador hace mucho ruido."
+              />
+            </label>
+            <div className="support-actions">
+              <button className="primary-button" onClick={props.onCreateTicket} disabled={props.isBusy}>
+                <ArrowRight size={17} /> Pedir asistencia
+              </button>
+              {remoteCode && (
+                <button className="secondary-button" onClick={props.onOpenRemote}>
+                  <Wrench size={17} /> Abrir remoto
+                </button>
+              )}
+            </div>
+            {remoteCode && (
+              <div className="remote-code-box">
+                <span>Código de sesión</span>
+                <strong>{remoteCode}</strong>
+                <small>Vence en {props.remoteSession?.expiresInMinutes ?? 20} minutos</small>
+              </div>
+            )}
+          </section>
+
+          <section className="surface-card health-card">
+            <div className="section-heading">
+              <div><h2>Estado del equipo</h2><p>Último diagnóstico disponible.</p></div>
+              <Activity size={19} />
+            </div>
+            <div className="health-grid">
+              <HealthMetric icon={<Cpu size={18} />} label="Memoria" value={ramUsagePercent == null ? '—' : `${ramUsagePercent}% en uso`} tone={ramUsagePercent != null && ramUsagePercent > 85 ? 'warning' : 'normal'} />
+              <HealthMetric icon={<HardDrive size={18} />} label="Disco libre" value={diskFreePercent == null ? '—' : `${diskFreePercent}%`} tone={diskFreePercent != null && diskFreePercent < 15 ? 'warning' : 'normal'} />
+              <HealthMetric icon={<Thermometer size={18} />} label="Temperatura" value={report?.maxTemperatureC == null ? '—' : `${report.maxTemperatureC.toFixed(1)} °C`} tone={report?.maxTemperatureC != null && report.maxTemperatureC > 80 ? 'warning' : 'normal'} />
+              <HealthMetric icon={<ShieldCheck size={18} />} label="Seguridad" value={report?.defenderStatus ?? 'Sin revisar'} tone="normal" />
+            </div>
+            <button className="secondary-button full" onClick={props.onRunDiagnostic} disabled={props.isBusy}>
+              <RefreshCw className={props.isBusy ? 'spin' : ''} size={16} /> Ejecutar diagnóstico
+            </button>
+            {report?.recommendations?.[0] && <p className="diagnostic-note">{report.recommendations[0]}</p>}
+          </section>
+
+          <section className="surface-card tools-card">
+            <div className="section-heading">
+              <div><h2>Acciones seguras</h2><p>Chequeos puntuales, sin monitoreo permanente.</p></div>
+              <Wrench size={19} />
+            </div>
+            <div className="tool-grid">
+              <ToolButton icon={<Thermometer size={18} />} label="Temperatura" onClick={() => props.onAgentAction('temp_scan')} />
+              <ToolButton icon={<Zap size={18} />} label="Inicio" onClick={() => props.onAgentAction('startup_review')} />
+              <ToolButton icon={<RefreshCw size={18} />} label="Windows Update" onClick={() => props.onAgentAction('windows_update')} />
+              <ToolButton icon={<ShieldCheck size={18} />} label="Defender" onClick={() => props.onAgentAction('defender_status')} />
+            </div>
+            <div className="agent-note">
+              <span className={props.agentStatus?.monitoring ? 'status-dot warning' : 'status-dot'} />
+              <div>
+                <strong>{props.agentStatus?.monitoring ? 'Monitoreo activo' : 'Sólo bajo demanda'}</strong>
+                <span>{props.agentResult?.message ?? props.agentStatus?.notes ?? 'Las acciones se ejecutan únicamente al presionar un botón.'}</span>
+              </div>
+            </div>
+          </section>
+
+          <section className="surface-card update-card">
+            <div className="section-heading">
+              <div><h2>Aplicación</h2><p>Mantené NEXO Support actualizado.</p></div>
+              <ArrowDownToLine size={19} />
+            </div>
+            <div className="version-state">
+              <div>
+                <span>Versión instalada</span>
+                <strong>v{APP_VERSION}</strong>
+              </div>
+              <StatusPill label={updateAvailable ? 'Actualización disponible' : 'Al día'} tone={updateAvailable ? 'amber' : 'green'} />
+            </div>
+            <p>{props.updateResult?.notes ?? 'Todavía no se verificó el canal de actualizaciones.'}</p>
+            {updateAvailable ? (
+              <button className="primary-button full" onClick={props.onInstallUpdate} disabled={props.isUpdating}>
+                <ArrowDownToLine size={17} /> {props.isUpdating ? props.updateProgress || 'Instalando…' : `Instalar ${props.updateResult?.nextVersion}`}
+              </button>
+            ) : (
+              <button className="secondary-button full" onClick={props.onCheckUpdates}>
+                <RefreshCw size={16} /> Buscar actualización
+              </button>
+            )}
+          </section>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function HealthMetric({
+  icon,
+  label,
+  value,
+  tone
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  tone: 'normal' | 'warning';
 }) {
-  const latestTicket = dashboard?.tickets[0];
-  const latestDiagnostic = dashboard?.diagnostics[0];
-  const release = dashboard?.latestRelease ?? null;
-  const latestDiagnosticPayload = latestDiagnostic?.payload as Partial<DiagnosticReport> | undefined;
-  const thermalReport = diagnostic ?? latestDiagnosticPayload ?? null;
-  const thermalSource = thermalReport?.thermalZones?.[0] ?? null;
-  const thermalLabel = thermalReport?.maxTemperatureC ?? null;
-  const thermalNote = thermalReport?.temperatureNote ?? 'Ejecuta el diagnostico para leer temperatura.';
-  const thermalTone: 'neutral' | 'ok' | 'warn' | 'danger' = thermalLabel == null
-    ? 'neutral'
-    : thermalLabel >= 85
-      ? 'danger'
-      : thermalLabel >= 70
-        ? 'warn'
-        : 'ok';
-
   return (
-    <div className="stage-grid client-grid">
-      <section className="line-panel main-copy">
-        <p className="section-kicker">CLIENT DECK</p>
-        <h2>El equipo se registra y el soporte queda trazado.</h2>
-        <p>
-          Este lado crea tickets, guarda diagnostico on-demand y prepara la sesion remota. No queda monitoreando en segundo plano.
-        </p>
-        <div className="button-row">
-          <button className="gold-action" onClick={onRunDiagnostic}><MonitorCog size={14} /> Correr diagnostico</button>
-          <button className="line-action" onClick={onOpenRemote}><Wrench size={14} /> Abrir remoto</button>
-        </div>
-      </section>
-
-      <section className="line-panel request-panel">
-        <p className="section-kicker">SOPORTE</p>
-        <textarea value={issue} onChange={(event) => setIssue(event.target.value)} />
-        <button className="gold-action full" onClick={onCreateTicket}>
-          <ClipboardList size={14} /> Crear ticket
-        </button>
-        <div className="session-code">
-          <span>REMOTE CODE</span>
-          <strong>{remoteSession?.code ?? latestTicket?.remoteCode ?? 'PENDIENTE'}</strong>
-          <small>{remoteSession?.instructions ?? 'Creando ticket se habilita el codigo de sesion.'}</small>
-        </div>
-      </section>
-
-      <section className="thin-readout">
-        <DataLine label="Equipo" value={dashboard?.device.displayName ?? 'Pendiente'} muted={!dashboard} />
-        <DataLine label="OS" value={dashboard?.device.os ?? 'Pendiente'} muted={!dashboard} />
-        <DataLine label="Ticket" value={latestTicket?.id ?? 'Pendiente'} muted={!dashboard} />
-        <DataLine label="Release" value={release?.version ?? 'Pendiente'} muted={!dashboard} />
-        <DataLine label="Temp max" value={thermalLabel != null ? `${thermalLabel.toFixed(1)} °C` : 'Pendiente'} muted={thermalLabel == null} />
-        <DataLine label="Zona" value={thermalSource?.name ?? 'No detectada'} muted={!thermalSource} />
-        <DataLine label="Sensor" value={thermalSource?.source ?? 'ACPI / WMI'} muted={!thermalSource} />
-        <DataLine label="Nota" value={thermalNote} muted={!thermalReport} />
-        <DataLine label="Update" value={updateResult?.status.toUpperCase() ?? 'PENDIENTE'} muted={!updateResult} />
-        <StatusPill tone={thermalTone}>{thermalLabel == null ? 'TEMP PENDIENTE' : thermalLabel >= 85 ? 'TEMP CRITICA' : thermalLabel >= 70 ? 'TEMP ALTA' : 'TEMP OK'}</StatusPill>
-      </section>
-
-      {activeTab === 'overview' && (
-        <section className="line-panel overview-panel">
-          <p className="section-kicker">OVERVIEW</p>
-          <div className="device-stack">
-            <DataLine label="Usuario" value={dashboard?.device.userName ?? 'Pendiente'} muted={!dashboard} />
-            <DataLine label="Estado" value={dashboard?.device.status.toUpperCase() ?? 'Pendiente'} muted={!dashboard} />
-            <DataLine label="Ultimo diagnostico" value={latestDiagnostic?.generatedAt ?? 'Sin datos'} muted={!latestDiagnostic} />
-          </div>
-        </section>
-      )}
-
-      {activeTab === 'ticket' && (
-        <section className="line-panel ticket-detail">
-          <p className="section-kicker">TICKET</p>
-          <h2>{latestTicket?.id ?? 'Sin ticket'}</h2>
-          <p>{latestTicket?.issue ?? 'No hay tickets sincronizados.'}</p>
-          <div className="button-row">
-            <button className="gold-action" onClick={onCreateTicket}><ArrowRight size={14} /> Nuevo ticket</button>
-            <button className="line-action" onClick={onCheckUpdates}>Ver updates</button>
-          </div>
-        </section>
-      )}
-
-      {activeTab === 'maintenance' && (
-        <section className="line-panel maintenance-panel">
-          <p className="section-kicker">MAINTENANCE</p>
-          <div className="action-matrix">
-            <button className="matrix-action" onClick={() => onAgentAction('temp_scan')}>
-              <HardDrive size={26} />
-              Temp scan
-            </button>
-            <button className="matrix-action" onClick={() => onAgentAction('startup_review')}>
-              <Activity size={26} />
-              Startup
-            </button>
-            <button className="matrix-action" onClick={() => onAgentAction('windows_update')}>
-              <ArrowDownToLine size={26} />
-              Windows Update
-            </button>
-            <button className="matrix-action" onClick={() => onAgentAction('defender_status')}>
-              <ShieldCheck size={26} />
-              Defender
-            </button>
-            <button className="matrix-action" onClick={() => onAgentAction('thermal_status')}>
-              <Thermometer size={26} />
-              Temperatura
-            </button>
-          </div>
-          <div className="mini-notes">
-            <p>Agent status: {agentStatus?.mode ?? 'standby'}.</p>
-            <p>{agentResult?.message ?? 'Las acciones se ejecutan on-demand.'}</p>
-          </div>
-        </section>
-      )}
+    <div className={`health-metric ${tone}`}>
+      <span className="metric-icon">{icon}</span>
+      <div><span>{label}</span><strong>{value}</strong></div>
     </div>
   );
 }
 
-function TicketRow({ ticket, selected, onSelect }: { ticket: TicketRecord; selected?: boolean; onSelect: (ticketId: string) => void }) {
-  return (
-    <button className={`ticket-row ${selected ? 'active' : ''}`} onClick={() => onSelect(ticket.id)}>
-      <span>
-        <b>{ticket.id}</b>
-        <small>{ticket.clientName} · {ticket.issue}</small>
-      </span>
-      <StatusPill tone={ticket.priority === 'alta' ? 'warn' : 'neutral'}>{ticket.priority.toUpperCase()}</StatusPill>
-    </button>
-  );
+function ToolButton({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
+  return <button className="tool-button" onClick={onClick}>{icon}<span>{label}</span></button>;
 }
 
-function StatusPill({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'ok' | 'warn' | 'danger' }) {
-  return <span className={`status-pill ${tone}`}>{children}</span>;
+function InfoLine({ label, value }: { label: string; value: string }) {
+  return <div className="info-line"><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function DataLine({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
+function StatusPill({ label, tone }: { label: string; tone: string }) {
+  return <span className={`status-pill ${tone}`}>{label}</span>;
+}
+
+function EmptyState({ text }: { text: string }) {
   return (
-    <div className="data-line">
-      <span>{label}</span>
-      <strong className={muted ? 'muted' : ''}>{value}</strong>
+    <div className="empty-state">
+      <CheckCircle2 size={24} />
+      <p>{text}</p>
     </div>
   );
 }
 
-function ToastBar({ toast }: { toast: NonNullable<Toast> }) {
+function ToastBar({ toast, onClose }: { toast: NonNullable<Toast>; onClose: () => void }) {
   return (
-    <div className={`toast ${toast.tone ?? 'neutral'}`}>
-      <Bell size={15} />
-      {toast.message}
+    <div className={`toast-bar ${toast.tone}`} role="status">
+      <span>{toast.message}</span>
+      <button onClick={onClose} aria-label="Cerrar"><X size={15} /></button>
     </div>
   );
 }
