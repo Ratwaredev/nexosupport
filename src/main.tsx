@@ -19,6 +19,7 @@ async function start() {
   await Promise.all([
     import('./assistant.css'),
     import('./assistant-first-run.css'),
+    import('./mode-picker.css'),
     import('./updater.css')
   ]);
   const [{ default: AssistantApp }, { default: AppUpdater }] = await Promise.all([
