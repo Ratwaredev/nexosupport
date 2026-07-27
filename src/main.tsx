@@ -18,12 +18,19 @@ async function start() {
 
   await Promise.all([
     import('./assistant.css'),
-    import('./assistant-first-run.css')
+    import('./assistant-first-run.css'),
+    import('./updater.css')
   ]);
-  const { default: AssistantApp } = await import('./AssistantApp');
+  const [{ default: AssistantApp }, { default: AppUpdater }] = await Promise.all([
+    import('./AssistantApp'),
+    import('./AppUpdater')
+  ]);
   root.render(
     <React.StrictMode>
-      <AssistantApp />
+      <>
+        <AssistantApp />
+        <AppUpdater />
+      </>
     </React.StrictMode>
   );
 }
