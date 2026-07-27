@@ -12,32 +12,45 @@ if ((Test-Path $DllTarget) -and (Test-Path $LicenseTarget)) {
 }
 
 $Work = Join-Path $env:TEMP ("nexo-lhm-" + [Guid]::NewGuid().ToString('N'))
+$Packages = Join-Path $Work 'packages'
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
 try {
-  $Package = Join-Path $Work 'librehardwaremonitorlib.zip'
-  $PackageUrl = "https://api.nuget.org/v3-flatcontainer/librehardwaremonitorlib/$Version/librehardwaremonitorlib.$Version.nupkg"
-  Write-Host "Descargando LibreHardwareMonitorLib $Version desde NuGet oficial..."
-  Invoke-WebRequest -UseBasicParsing -Uri $PackageUrl -OutFile $Package
-  Expand-Archive -Path $Package -DestinationPath (Join-Path $Work 'package') -Force
+  $Project = Join-Path $Work 'Sensors.csproj'
+  @"
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+  <ItemGroup><PackageReference Include="LibreHardwareMonitorLib" Version="$Version" /></ItemGroup>
+</Project>
+"@ | Set-Content -Path $Project -Encoding UTF8
 
+  Write-Host "Restaurando LibreHardwareMonitorLib $Version desde NuGet oficial..."
+  dotnet restore $Project --packages $Packages --nologo
+  if ($LASTEXITCODE -ne 0) { throw 'NuGet no pudo restaurar LibreHardwareMonitorLib.' }
+
+  $PackageRoot = Join-Path $Packages "librehardwaremonitorlib\$Version"
   $Candidates = @(
-    (Join-Path $Work 'package\lib\net472\LibreHardwareMonitorLib.dll'),
-    (Join-Path $Work 'package\lib\netstandard2.0\LibreHardwareMonitorLib.dll'),
-    (Join-Path $Work 'package\lib\net8.0\LibreHardwareMonitorLib.dll')
+    (Join-Path $PackageRoot 'lib\net472\LibreHardwareMonitorLib.dll'),
+    (Join-Path $PackageRoot 'lib\netstandard2.0\LibreHardwareMonitorLib.dll'),
+    (Join-Path $PackageRoot 'lib\net8.0\LibreHardwareMonitorLib.dll')
   )
   $Dll = $Candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
   if (-not $Dll) {
-    $Dll = Get-ChildItem (Join-Path $Work 'package') -Recurse -Filter 'LibreHardwareMonitorLib.dll' | Select-Object -First 1 -ExpandProperty FullName
+    $Dll = Get-ChildItem $PackageRoot -Recurse -Filter 'LibreHardwareMonitorLib.dll' | Select-Object -First 1 -ExpandProperty FullName
   }
   if (-not $Dll) { throw 'El paquete oficial no contiene LibreHardwareMonitorLib.dll.' }
   Copy-Item $Dll $DllTarget -Force
 
-  $LicenseUrl = "https://raw.githubusercontent.com/LibreHardwareMonitor/LibreHardwareMonitor/v$Version/LICENSE"
-  $ThirdPartyUrl = "https://raw.githubusercontent.com/LibreHardwareMonitor/LibreHardwareMonitor/v$Version/THIRD-PARTY-LICENSES"
-  $License = "LibreHardwareMonitor v$Version`r`nOfficial project: https://github.com/LibreHardwareMonitor/LibreHardwareMonitor`r`n`r`n"
-  try { $License += (Invoke-WebRequest -UseBasicParsing -Uri $LicenseUrl).Content } catch { $License += 'Licensed under MPL-2.0.' }
-  try { $License += "`r`n`r`nTHIRD-PARTY LICENSES`r`n" + (Invoke-WebRequest -UseBasicParsing -Uri $ThirdPartyUrl).Content } catch {}
-  [IO.File]::WriteAllText($LicenseTarget, $License)
+  $LicenseFile = Get-ChildItem $PackageRoot -Recurse -File | Where-Object { $_.Name -match '^(LICENSE|LICENSE\.txt|license\.md)$' } | Select-Object -First 1
+  if ($LicenseFile) {
+    Copy-Item $LicenseFile.FullName $LicenseTarget -Force
+  } else {
+    @"
+LibreHardwareMonitorLib $Version
+Official project: https://github.com/LibreHardwareMonitor/LibreHardwareMonitor
+License: Mozilla Public License 2.0 (MPL-2.0)
+Package: https://www.nuget.org/packages/LibreHardwareMonitorLib/$Version
+"@ | Set-Content -Path $LicenseTarget -Encoding UTF8
+  }
 
   $Hash = (Get-FileHash $DllTarget -Algorithm SHA256).Hash
   Write-Host "Sensor library ready. SHA256: $Hash"
