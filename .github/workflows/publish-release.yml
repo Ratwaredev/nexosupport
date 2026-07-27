@@ -1,0 +1,62 @@
+name: Publish NEXO Support release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, agent/nexo-support-rebrand]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare hardware sensor library
+        shell: pwsh
+        run: ./scripts/prepare-sensors.ps1
+
+      - name: Verify updater signing key
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            throw 'Missing repository secret TAURI_SIGNING_PRIVATE_KEY. The updater cannot publish unsigned releases.'
+          }
+
+      - name: Build and publish GitHub Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: v__VERSION__
+          releaseName: NEXO Support v__VERSION__
+          releaseBody: |
+            Actualización de NEXO Support.
+
+            - Corrige el primer inicio del popup.
+            - Separa los estilos del asistente y NEXO Control.
+            - Agrega actualizaciones desde la propia aplicación.
+            - Mantiene diagnósticos, sensores y permisos del usuario.
+          releaseDraft: false
+          prerelease: false
+          updaterJsonPreferNsis: true
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
+          retryAttempts: 2
