@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, CircleAlert, RefreshCw } from 'lucide-react';
+import { Check, CircleAlert, Download, RefreshCw, X } from 'lucide-react';
 import { isTauriRuntime, safeInvoke } from './lib/tauri';
 
 type AvailableUpdate = {
@@ -11,22 +11,37 @@ type UpdateState =
   | { status: 'idle' }
   | { status: 'checking'; manual: boolean }
   | { status: 'current' }
+  | { status: 'available'; update: AvailableUpdate }
   | { status: 'installing'; update: AvailableUpdate }
   | { status: 'error'; update?: AvailableUpdate; message: string };
 
 const CHECK_EVERY_MS = 15 * 60 * 1000;
+const SNOOZE_MS = 6 * 60 * 60 * 1000;
 const CURRENT_NOTICE_MS = 2600;
+
+function readableError(error: unknown, fallback: string) {
+  const raw = error instanceof Error ? error.message : fallback;
+  if (/network|fetch|internet|connection/i.test(raw)) return 'No pude consultar GitHub. Revisá Internet y probá otra vez.';
+  if (/signature|firma/i.test(raw)) return 'La actualización no superó la verificación de seguridad.';
+  return fallback;
+}
 
 export default function AppUpdater() {
   const [state, setState] = useState<UpdateState>({ status: 'idle' });
   const started = useRef(false);
   const installing = useRef(false);
   const checking = useRef(false);
+  const snoozeUntil = useRef(0);
   const clearTimer = useRef<number | null>(null);
 
   const clearNoticeLater = useCallback(() => {
     if (clearTimer.current) window.clearTimeout(clearTimer.current);
     clearTimer.current = window.setTimeout(() => setState({ status: 'idle' }), CURRENT_NOTICE_MS);
+  }, []);
+
+  const dismiss = useCallback(() => {
+    snoozeUntil.current = Date.now() + SNOOZE_MS;
+    setState({ status: 'idle' });
   }, []);
 
   const install = useCallback(async (update: AvailableUpdate) => {
@@ -40,19 +55,21 @@ export default function AppUpdater() {
       setState({
         status: 'error',
         update,
-        message: error instanceof Error ? error.message : 'No se pudo instalar la actualización.'
+        message: readableError(error, 'No se pudo instalar la actualización. NEXO sigue abierto y no cambió nada.')
       });
     }
   }, []);
 
   const check = useCallback(async (manual = false) => {
     if (!isTauriRuntime() || installing.current || checking.current) return;
+    if (!manual && Date.now() < snoozeUntil.current) return;
+
     checking.current = true;
     if (manual) setState({ status: 'checking', manual: true });
     try {
       const update = await safeInvoke<AvailableUpdate | null>('check_app_update');
       if (update) {
-        await install(update);
+        setState({ status: 'available', update });
         return;
       }
       if (manual) {
@@ -60,20 +77,22 @@ export default function AppUpdater() {
         clearNoticeLater();
       }
     } catch (error) {
-      setState({
-        status: 'error',
-        message: error instanceof Error ? error.message : 'No se pudo buscar una actualización.'
-      });
+      if (manual) {
+        setState({
+          status: 'error',
+          message: readableError(error, 'No se pudo buscar una actualización.')
+        });
+      }
     } finally {
       checking.current = false;
     }
-  }, [clearNoticeLater, install]);
+  }, [clearNoticeLater]);
 
   useEffect(() => {
     if (!isTauriRuntime() || started.current) return;
     started.current = true;
 
-    const first = window.setTimeout(() => void check(false), 1200);
+    const first = window.setTimeout(() => void check(false), 1600);
     const interval = window.setInterval(() => void check(false), CHECK_EVERY_MS);
     const onFocus = () => void check(false);
     const onVisibility = () => {
@@ -96,20 +115,63 @@ export default function AppUpdater() {
   }, [check]);
 
   if (state.status === 'idle') return null;
-  const isInstalling = state.status === 'installing';
-  const isChecking = state.status === 'checking';
-  const isCurrent = state.status === 'current';
+
+  if (state.status === 'checking' || state.status === 'current') {
+    return (
+      <aside className={`app-update-toast ${state.status}`} role="status" aria-live="polite">
+        <span>{state.status === 'current' ? <Check size={17} /> : <RefreshCw className="spin" size={17} />}</span>
+        <div>
+          <b>{state.status === 'current' ? 'NEXO está al día' : 'Buscando actualización'}</b>
+          <small>{state.status === 'current' ? 'No hay una versión más nueva.' : 'Esto tarda unos segundos.'}</small>
+        </div>
+      </aside>
+    );
+  }
+
+  const update = state.status === 'available' || state.status === 'installing' ? state.update : state.update;
+  const installingNow = state.status === 'installing';
+  const failed = state.status === 'error';
 
   return (
-    <aside className={`app-update ${state.status}`} role="status" aria-live="polite">
-      <span className="app-update-icon">
-        {isCurrent ? <Check size={18} /> : isInstalling || isChecking ? <RefreshCw className="spin" size={18} /> : <CircleAlert size={18} />}
-      </span>
-      <div>
-        <b>{isInstalling ? `Actualizando a ${state.update.version}` : isChecking ? 'Buscando actualización' : isCurrent ? 'NEXO está al día' : 'No pude actualizar NEXO'}</b>
-        <p>{isInstalling ? 'Se instalará solo y NEXO volverá a abrir.' : isChecking ? 'Esto tarda unos segundos.' : isCurrent ? 'No hay una versión más nueva.' : state.message}</p>
-      </div>
-      {state.status === 'error' && <button className="app-update-primary" onClick={() => void check(true)}>Reintentar</button>}
-    </aside>
+    <div className="app-update-backdrop" role="presentation">
+      <section className={`app-update-dialog ${state.status}`} role="dialog" aria-modal="true" aria-labelledby="nexo-update-title">
+        {!installingNow && (
+          <button className="app-update-dialog-close" aria-label="Cerrar actualización" onClick={dismiss}>
+            <X size={16} />
+          </button>
+        )}
+
+        <span className="app-update-dialog-icon">
+          {failed ? <CircleAlert size={23} /> : installingNow ? <RefreshCw className="spin" size={23} /> : <Download size={23} />}
+        </span>
+
+        <div className="app-update-dialog-copy">
+          <small>ACTUALIZACIÓN DE NEXO</small>
+          <h2 id="nexo-update-title">
+            {failed ? 'No se pudo actualizar' : installingNow ? 'Instalando actualización' : `NEXO ${update?.version || ''} está disponible`}
+          </h2>
+          <p>
+            {failed
+              ? state.message
+              : installingNow
+                ? 'NEXO se cerrará, instalará la nueva versión y volverá a abrir automáticamente.'
+                : 'La descarga está firmada. Podés actualizar ahora o seguir trabajando y hacerlo más tarde.'}
+          </p>
+        </div>
+
+        <footer>
+          {!installingNow && <button className="app-update-secondary" onClick={dismiss}>Más tarde</button>}
+          {!installingNow && (
+            <button
+              className="app-update-primary"
+              onClick={() => update ? void install(update) : void check(true)}
+            >
+              {failed ? 'Reintentar' : 'Actualizar ahora'}
+            </button>
+          )}
+          {installingNow && <div className="app-update-progress"><i /><span>Descargando e instalando…</span></div>}
+        </footer>
+      </section>
+    </div>
   );
 }
