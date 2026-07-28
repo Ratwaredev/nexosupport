@@ -1,10 +1,12 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { ensureLocalOwnerWorkspace } from './lib/local-owner-bootstrap';
 
 const url = new URL(window.location.href);
 const isAdminView = url.pathname.endsWith('/admin.html') || url.searchParams.get('view') === 'admin';
 
 async function start() {
+  ensureLocalOwnerWorkspace();
   const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
 
   if (isAdminView) {
