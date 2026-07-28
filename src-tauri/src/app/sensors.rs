@@ -1,7 +1,12 @@
 use super::types::HardwareSnapshot;
 use rand::{distributions::Alphanumeric, Rng};
 #[cfg(target_os = "windows")]
-use std::{fs, path::{Path, PathBuf}, process::Command};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    time::Duration,
+};
 use tauri::AppHandle;
 #[cfg(target_os = "windows")]
 use tauri::{path::BaseDirectory, Manager};
@@ -9,7 +14,13 @@ use tauri::{path::BaseDirectory, Manager};
 use chrono::Utc;
 
 #[tauri::command]
-pub fn read_hardware_sensors(app: AppHandle, elevated: bool) -> Result<HardwareSnapshot, String> {
+pub async fn read_hardware_sensors(app: AppHandle, elevated: bool) -> Result<HardwareSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || read_hardware_sensors_blocking(app, elevated))
+        .await
+        .map_err(|error| format!("La lectura de sensores se interrumpió: {error}"))?
+}
+
+fn read_hardware_sensors_blocking(app: AppHandle, elevated: bool) -> Result<HardwareSnapshot, String> {
     #[cfg(target_os = "windows")]
     {
         let Some(dll) = find_sensor_library(&app) else {
@@ -64,6 +75,7 @@ fn lhm_script(elevated: bool) -> String {
         r#"
 param([string]$DllPath, [string]$OutPath)
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 Add-Type -Path $DllPath
 $computer = [LibreHardwareMonitor.Hardware.Computer]::new()
 $computer.IsCpuEnabled = $true
@@ -72,35 +84,38 @@ $computer.IsMemoryEnabled = $true
 $computer.IsMotherboardEnabled = $true
 $computer.IsControllerEnabled = $true
 $computer.IsStorageEnabled = $true
-$computer.IsNetworkEnabled = $true
-$computer.Open()
-$sensors = New-Object System.Collections.Generic.List[object]
-function Read-Hardware([object]$hardware) {{
-  $hardware.Update()
-  foreach ($sensor in $hardware.Sensors) {{
-    if ($null -ne $sensor.Value) {{
-      $sensors.Add([PSCustomObject]@{{
-        hardwareType = $hardware.HardwareType.ToString()
-        hardwareName = $hardware.Name
-        sensorType = $sensor.SensorType.ToString()
-        sensorName = $sensor.Name
-        value = [Math]::Round([double]$sensor.Value, 2)
-        min = if ($null -ne $sensor.Min) {{ [Math]::Round([double]$sensor.Min, 2) }} else {{ $null }}
-        max = if ($null -ne $sensor.Max) {{ [Math]::Round([double]$sensor.Max, 2) }} else {{ $null }}
-      }})
+$computer.IsNetworkEnabled = $false
+try {{
+  $computer.Open()
+  $sensors = New-Object System.Collections.Generic.List[object]
+  function Read-Hardware([object]$hardware) {{
+    $hardware.Update()
+    foreach ($sensor in $hardware.Sensors) {{
+      if ($null -ne $sensor.Value) {{
+        $sensors.Add([PSCustomObject]@{{
+          hardwareType = $hardware.HardwareType.ToString()
+          hardwareName = $hardware.Name
+          sensorType = $sensor.SensorType.ToString()
+          sensorName = $sensor.Name
+          value = [Math]::Round([double]$sensor.Value, 2)
+          min = if ($null -ne $sensor.Min) {{ [Math]::Round([double]$sensor.Min, 2) }} else {{ $null }}
+          max = if ($null -ne $sensor.Max) {{ [Math]::Round([double]$sensor.Max, 2) }} else {{ $null }}
+        }})
+      }}
     }}
+    foreach ($sub in $hardware.SubHardware) {{ Read-Hardware $sub }}
   }}
-  foreach ($sub in $hardware.SubHardware) {{ Read-Hardware $sub }}
+  foreach ($hardware in $computer.Hardware) {{ Read-Hardware $hardware }}
+  $cpuTemperature = @($sensors | Where-Object {{ $_.hardwareType -match 'Cpu' -and $_.sensorType -eq 'Temperature' }})
+  $fanSensors = @($sensors | Where-Object {{ $_.sensorType -eq 'Fan' }})
+  $permissionRequired = (-not {elevated_literal}) -and ($cpuTemperature.Count -eq 0 -and $fanSensors.Count -eq 0)
+  $note = if ($permissionRequired) {{ 'Windows no expuso algunos sensores. Podés intentar una lectura avanzada con autorización.' }} elseif ($sensors.Count -eq 0) {{ 'La placa o sus controladores no exponen sensores compatibles.' }} else {{ 'Lectura directa de los sensores expuestos por el hardware.' }}
+  $result = [PSCustomObject]@{{ generatedAt = (Get-Date).ToUniversalTime().ToString('o'); source = 'libre-hardware-monitor'; elevated = {elevated_literal}; permissionRequired = [bool]$permissionRequired; note = $note; sensors = @($sensors) }}
+  $json = $result | ConvertTo-Json -Compress -Depth 6
+  [IO.File]::WriteAllText($OutPath, $json)
+}} finally {{
+  try {{ $computer.Close() }} catch {{}}
 }}
-foreach ($hardware in $computer.Hardware) {{ Read-Hardware $hardware }}
-$computer.Close()
-$cpuTemperature = @($sensors | Where-Object {{ $_.hardwareType -match 'Cpu' -and $_.sensorType -eq 'Temperature' }})
-$fanSensors = @($sensors | Where-Object {{ $_.sensorType -eq 'Fan' }})
-$permissionRequired = (-not {elevated_literal}) -and ($cpuTemperature.Count -eq 0 -and $fanSensors.Count -eq 0)
-$note = if ($permissionRequired) {{ 'Windows no expuso algunos sensores. Podés intentar una lectura avanzada con autorización.' }} elseif ($sensors.Count -eq 0) {{ 'La placa o sus controladores no exponen sensores compatibles.' }} else {{ 'Lectura directa de los sensores expuestos por el hardware.' }}
-$result = [PSCustomObject]@{{ generatedAt = (Get-Date).ToUniversalTime().ToString('o'); source = 'libre-hardware-monitor'; elevated = {elevated_literal}; permissionRequired = [bool]$permissionRequired; note = $note; sensors = @($sensors) }}
-$json = $result | ConvertTo-Json -Compress -Depth 6
-if ($OutPath) {{ [IO.File]::WriteAllText($OutPath, $json) }} else {{ $json }}
 "#
     )
 }
@@ -118,11 +133,14 @@ fn run_lhm_snapshot(dll: &Path, elevated: bool) -> Result<HardwareSnapshot, Stri
     fs::write(&script_path, lhm_script(elevated))
         .map_err(|error| format!("No se pudo preparar la lectura: {error}"))?;
 
-    if elevated {
-        run_elevated(&script_path, dll, &output_path)?;
+    let result = if elevated {
+        run_elevated(&script_path, dll, &output_path)
     } else {
-        let output = Command::new("powershell")
+        let mut command = Command::new("powershell");
+        command
+            .arg("-NoLogo")
             .arg("-NoProfile")
+            .arg("-NonInteractive")
             .arg("-ExecutionPolicy")
             .arg("Bypass")
             .arg("-File")
@@ -130,18 +148,27 @@ fn run_lhm_snapshot(dll: &Path, elevated: bool) -> Result<HardwareSnapshot, Stri
             .arg("-DllPath")
             .arg(dll)
             .arg("-OutPath")
-            .arg(&output_path)
-            .output()
-            .map_err(|error| format!("No se pudo ejecutar el lector de sensores: {error}"))?;
-        if !output.status.success() {
+            .arg(&output_path);
+        let output = super::diagnostics::run_command_with_timeout(
+            command,
+            Duration::from_secs(24),
+            "la lectura de sensores",
+        )?;
+        if output.status.success() {
+            Ok(())
+        } else {
             let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            cleanup(&script_path, &output_path);
-            return Err(if detail.is_empty() {
+            Err(if detail.is_empty() {
                 "Windows rechazó la lectura de sensores.".to_string()
             } else {
                 detail
-            });
+            })
         }
+    };
+
+    if let Err(error) = result {
+        cleanup(&script_path, &output_path);
+        return Err(error);
     }
 
     let raw = fs::read_to_string(&output_path)
@@ -156,14 +183,24 @@ fn run_elevated(script: &Path, dll: &Path, output: &Path) -> Result<(), String> 
     let escaped_script = ps_quote(script.to_string_lossy().as_ref());
     let escaped_dll = ps_quote(dll.to_string_lossy().as_ref());
     let escaped_output = ps_quote(output.to_string_lossy().as_ref());
-    let command = format!(
-        "$argsLine = '-NoProfile -ExecutionPolicy Bypass -File \"{escaped_script}\" -DllPath \"{escaped_dll}\" -OutPath \"{escaped_output}\"'; $p = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList $argsLine; exit $p.ExitCode"
+    let command_text = format!(
+        "$argsLine = '-NoLogo -NoProfile -ExecutionPolicy Bypass -File \"{escaped_script}\" -DllPath \"{escaped_dll}\" -OutPath \"{escaped_output}\"'; $p = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList $argsLine; exit $p.ExitCode"
     );
-    let status = Command::new("powershell")
-        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &command])
-        .status()
-        .map_err(|error| format!("No se pudo solicitar autorización a Windows: {error}"))?;
-    if status.success() {
+    let mut command = Command::new("powershell");
+    command.args([
+        "-NoLogo",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        &command_text,
+    ]);
+    let result = super::diagnostics::run_command_with_timeout(
+        command,
+        Duration::from_secs(120),
+        "la autorización de sensores",
+    )?;
+    if result.status.success() {
         Ok(())
     } else {
         Err("La autorización fue cancelada o Windows rechazó la lectura.".to_string())
@@ -187,7 +224,7 @@ fn acpi_fallback(reason: &str) -> Result<HardwareSnapshot, String> {
         r#"
 $zones = @()
 try {
-  $zones = Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature | ForEach-Object {
+  $zones = Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -OperationTimeoutSec 5 | ForEach-Object {
     if ($null -ne $_.CurrentTemperature) {
       [PSCustomObject]@{ hardwareType = 'Mainboard'; hardwareName = 'ACPI'; sensorType = 'Temperature'; sensorName = $_.InstanceName; value = [Math]::Round(($_.CurrentTemperature / 10) - 273.15, 1); min = $null; max = $null }
     }
