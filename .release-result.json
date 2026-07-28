@@ -1,10 +1,10 @@
 {
-  "version": "0.3.28",
+  "version": "0.3.29",
   "status": "failure",
-  "runId": "30318754542",
-  "commit": "7e400f92934b1bb567ee7d8aff92df62b9c9bf67",
-  "releaseUrl": "https://github.com/Ratwaredev/underdocksoporteapp/releases/tag/v0.3.28",
+  "runId": "30318861798",
+  "commit": "34859c7e06d2dbcc06b38324507aab3170416fd8",
+  "releaseUrl": null,
   "updaterPlatform": null,
   "updaterProbe": null,
-  "recordedAt": "2026-07-28T00:58:45.343Z"
+  "recordedAt": "2026-07-28T01:01:51.931Z"
 }
