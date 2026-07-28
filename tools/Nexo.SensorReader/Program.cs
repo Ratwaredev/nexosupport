@@ -56,7 +56,7 @@ internal static class Program
             {
                 computer.Open();
             }
-            catch (Exception error)
+            catch
             {
                 return new HardwareSnapshot(
                     DateTimeOffset.UtcNow.ToString("O"),
@@ -65,7 +65,7 @@ internal static class Program
                     !elevated,
                     !elevated
                         ? "Windows puede requerir permiso para acceder a los sensores del firmware."
-                        : $"El lector de hardware no pudo abrir los sensores: {error.GetType().Name}.",
+                        : "El lector no pudo acceder a sensores compatibles incluso con permiso.",
                     Array.Empty<HardwareSensor>());
             }
             var visitor = new UpdateVisitor();
