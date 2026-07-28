@@ -14,12 +14,12 @@
       {
         "label": "main",
         "title": "NEXO Support",
-        "width": 408,
-        "height": 620,
-        "minWidth": 408,
-        "minHeight": 560,
-        "maxWidth": 408,
-        "maxHeight": 680,
+        "width": 420,
+        "height": 500,
+        "minWidth": 420,
+        "minHeight": 500,
+        "maxWidth": 420,
+        "maxHeight": 500,
         "resizable": false,
         "maximizable": false,
         "decorations": false,
@@ -36,7 +36,7 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "icon": ["icons/icon.ico"],
-    "resources": ["resources/sensors/"],
+    "resources": ["resources/sensor-helper/"],
     "targets": ["nsis"]
   },
   "plugins": {
