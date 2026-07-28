@@ -36,10 +36,7 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "icon": ["icons/icon.ico"],
-    "resources": [
-      "resources/LibreHardwareMonitorLib.dll",
-      "resources/LibreHardwareMonitor.LICENSE.txt"
-    ],
+    "resources": ["resources/sensors/"],
     "targets": ["nsis"]
   },
   "plugins": {

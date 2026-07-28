@@ -1,56 +1,60 @@
 $ErrorActionPreference = 'Stop'
 $Version = '0.9.6'
 $Root = Split-Path -Parent $PSScriptRoot
-$Destination = Join-Path $Root 'src-tauri\resources'
-$DllTarget = Join-Path $Destination 'LibreHardwareMonitorLib.dll'
-$LicenseTarget = Join-Path $Destination 'LibreHardwareMonitor.LICENSE.txt'
+$Destination = Join-Path $Root 'src-tauri\resources\sensors'
+$MainDll = Join-Path $Destination 'LibreHardwareMonitorLib.dll'
+$Marker = Join-Path $Destination '.nexo-sensors-version'
 
 New-Item -ItemType Directory -Force -Path $Destination | Out-Null
-if ((Test-Path $DllTarget) -and (Test-Path $LicenseTarget)) {
-  Write-Host 'LibreHardwareMonitor ya está preparado.'
-  exit 0
+
+$prepared = (Test-Path $MainDll) -and (Test-Path $Marker) -and ((Get-Content $Marker -Raw).Trim() -eq $Version)
+if ($prepared) {
+  $dllCount = @(Get-ChildItem $Destination -Filter '*.dll' -File).Count
+  if ($dllCount -ge 4) {
+    Write-Host "LibreHardwareMonitor $Version ya está preparado ($dllCount DLLs)."
+    exit 0
+  }
 }
 
 $Work = Join-Path $env:TEMP ("nexo-lhm-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
+
 try {
-  $Archive = Join-Path $Work 'LibreHardwareMonitorLib.zip'
-  $PackageRoot = Join-Path $Work 'package'
-  $Url = "https://api.nuget.org/v3-flatcontainer/librehardwaremonitorlib/$Version/librehardwaremonitorlib.$Version.nupkg"
+  $Archive = Join-Path $Work 'LibreHardwareMonitor.zip'
+  $Extracted = Join-Path $Work 'portable'
+  $Url = "https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/releases/download/v$Version/LibreHardwareMonitor.zip"
 
-  Write-Host "Descargando LibreHardwareMonitorLib $Version desde NuGet oficial..."
+  Write-Host "Descargando distribución oficial de LibreHardwareMonitor $Version..."
   & curl.exe --fail --location --retry 3 --silent --show-error --output $Archive $Url
-  if ($LASTEXITCODE -ne 0) { throw "NuGet rechazó la descarga con código $LASTEXITCODE." }
-  if (-not (Test-Path $Archive)) { throw 'NuGet no generó el archivo descargado.' }
-  if ((Get-Item $Archive).Length -lt 10000) { throw 'La descarga de NuGet es demasiado pequeña y no parece un paquete válido.' }
+  if ($LASTEXITCODE -ne 0) { throw "GitHub rechazó la descarga con código $LASTEXITCODE." }
+  if (-not (Test-Path $Archive)) { throw 'No se generó el archivo de sensores.' }
+  if ((Get-Item $Archive).Length -lt 1000000) { throw 'La descarga de sensores es demasiado pequeña.' }
 
-  Expand-Archive -Path $Archive -DestinationPath $PackageRoot -Force
-  $Candidates = @(
-    (Join-Path $PackageRoot 'lib\net472\LibreHardwareMonitorLib.dll'),
-    (Join-Path $PackageRoot 'lib\netstandard2.0\LibreHardwareMonitorLib.dll'),
-    (Join-Path $PackageRoot 'lib\net8.0\LibreHardwareMonitorLib.dll')
-  )
-  $Dll = $Candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-  if (-not $Dll) {
-    $Dll = Get-ChildItem $PackageRoot -Recurse -Filter 'LibreHardwareMonitorLib.dll' | Select-Object -First 1 -ExpandProperty FullName
-  }
-  if (-not $Dll) { throw 'El paquete oficial no contiene LibreHardwareMonitorLib.dll.' }
-  Copy-Item $Dll $DllTarget -Force
+  Expand-Archive -Path $Archive -DestinationPath $Extracted -Force
+  $SourceDll = Get-ChildItem $Extracted -Recurse -Filter 'LibreHardwareMonitorLib.dll' -File | Select-Object -First 1
+  if (-not $SourceDll) { throw 'La distribución oficial no contiene LibreHardwareMonitorLib.dll.' }
 
-  $LicenseFile = Get-ChildItem $PackageRoot -Recurse -File | Where-Object { $_.Name -match '^(LICENSE|LICENSE\.txt|license\.md)$' } | Select-Object -First 1
-  if ($LicenseFile) {
-    Copy-Item $LicenseFile.FullName $LicenseTarget -Force
-  } else {
-    @"
-LibreHardwareMonitorLib $Version
-Official project: https://github.com/LibreHardwareMonitor/LibreHardwareMonitor
-License: Mozilla Public License 2.0 (MPL-2.0)
-Package: https://www.nuget.org/packages/LibreHardwareMonitorLib/$Version
-"@ | Set-Content -Path $LicenseTarget -Encoding UTF8
+  $SourceDirectory = $SourceDll.Directory.FullName
+  Remove-Item (Join-Path $Destination '*') -Recurse -Force -ErrorAction SilentlyContinue
+
+  $Patterns = @('*.dll', '*.sys', '*.config', '*.manifest', 'LICENSE*', 'THIRD-PARTY-LICENSES*')
+  foreach ($Pattern in $Patterns) {
+    Get-ChildItem $SourceDirectory -Filter $Pattern -File -ErrorAction SilentlyContinue | Copy-Item -Destination $Destination -Force
   }
 
-  $Hash = (Get-FileHash $DllTarget -Algorithm SHA256).Hash
-  Write-Host "Sensor library ready. SHA256: $Hash"
+  if (-not (Test-Path $MainDll)) { throw 'No se copió la biblioteca principal de sensores.' }
+
+  $Required = @('LibreHardwareMonitorLib.dll', 'HidSharp.dll')
+  foreach ($File in $Required) {
+    if (-not (Test-Path (Join-Path $Destination $File))) {
+      throw "La distribución de sensores quedó incompleta: falta $File."
+    }
+  }
+
+  Set-Content -Path $Marker -Value $Version -Encoding ascii
+  $dllCount = @(Get-ChildItem $Destination -Filter '*.dll' -File).Count
+  $totalBytes = (Get-ChildItem $Destination -File | Measure-Object Length -Sum).Sum
+  Write-Host "Sensores preparados: $dllCount DLLs, $totalBytes bytes."
 } finally {
   Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
 }
