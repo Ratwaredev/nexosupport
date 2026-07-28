@@ -23,5 +23,6 @@
 .app-update-progress{grid-column:1/-1;height:42px;display:grid;grid-template-columns:1fr;align-content:center;gap:8px;color:#626671;font-size:9px;text-align:center}
 .app-update-progress i{height:4px;border-radius:999px;background:#ecebf7;overflow:hidden}
 .app-update-progress i::after{content:"";display:block;width:38%;height:100%;border-radius:999px;background:#5a51c7;animation:update-progress 1.1s ease-in-out infinite}
+.nc-toast{z-index:180}
 @keyframes update-progress{from{transform:translateX(-120%)}to{transform:translateX(365%)}}
 @media(max-height:590px){.app-update-toast{bottom:68px}.app-update-dialog{padding:18px}.app-update-dialog-icon{margin-bottom:12px}.app-update-dialog footer{margin-top:16px}}

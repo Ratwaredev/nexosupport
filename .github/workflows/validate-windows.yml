@@ -17,30 +17,40 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
       - uses: dtolnay/rust-toolchain@stable
       - name: Install dependencies
         run: npm ci
-      - name: Prepare hardware sensor library
+      - name: Build native sensor reader
         shell: pwsh
         run: ./scripts/prepare-sensors.ps1
-      - name: Verify sensor source bundle
+      - name: Verify and execute sensor reader before packaging
         shell: pwsh
         run: |
-          $root = Join-Path $PWD 'src-tauri\resources\sensors'
-          $required = @('LibreHardwareMonitorLib.dll', 'HidSharp.dll')
-          foreach ($name in $required) {
-            $path = Join-Path $root $name
-            if (-not (Test-Path $path)) { throw "Missing sensor dependency before build: $name" }
-          }
-          $dlls = @(Get-ChildItem $root -Filter '*.dll' -File)
-          if ($dlls.Count -lt 4) { throw "Sensor bundle is incomplete: only $($dlls.Count) DLLs." }
-          Write-Host "Sensor source bundle verified: $($dlls.Count) DLLs."
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $PWD 'src-tauri\resources\sensor-helper'
+          $reader = Join-Path $root 'Nexo.SensorReader.exe'
+          $library = Join-Path $root 'LibreHardwareMonitorLib.dll'
+          if (-not (Test-Path $reader)) { throw 'Missing Nexo.SensorReader.exe before build.' }
+          if (-not (Test-Path $library)) { throw 'Missing LibreHardwareMonitorLib.dll before build.' }
+          $files = @(Get-ChildItem $root -File)
+          $bytes = ($files | Measure-Object Length -Sum).Sum
+          if ($files.Count -lt 10 -or $bytes -lt 10000000) { throw "Sensor helper is incomplete: $($files.Count) files, $bytes bytes." }
+          $probePath = Join-Path $env:RUNNER_TEMP 'sensor-source-probe.json'
+          $process = Start-Process -FilePath $reader -ArgumentList @('--output', $probePath) -Wait -PassThru -NoNewWindow
+          if ($process.ExitCode -ne 0) { throw "Sensor reader exited with code $($process.ExitCode)." }
+          $probe = Get-Content $probePath -Raw | ConvertFrom-Json
+          if ($probe.source -ne 'native-helper') { throw "Unexpected sensor source: $($probe.source)" }
+          if ($null -eq $probe.sensors) { throw 'Sensor reader did not return a sensors array.' }
+          Write-Host "Sensor reader executed successfully with $(@($probe.sensors).Count) readings."
       - name: Validate frontend
         shell: pwsh
         run: |
           npm run build *>&1 | Tee-Object -FilePath frontend.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Verify close and update product contracts
+      - name: Verify product contracts
         run: node scripts/verify-product-contracts.mjs
       - name: Upload frontend diagnostic
         if: failure()
@@ -53,7 +63,7 @@ jobs:
         run: |
           npm install --no-save playwright
           npx playwright install chromium
-      - name: Exercise popup actions and admin entry
+      - name: Exercise compact popup actions and admin entry
         shell: pwsh
         run: |
           $preview = Start-Process npm.cmd -ArgumentList @('run','preview','--','--host','127.0.0.1','--port','4173') -PassThru
@@ -93,7 +103,7 @@ jobs:
           if-no-files-found: ignore
       - name: Build unsigned Windows installer
         run: npm run tauri:build -- --config src-tauri/tauri.ci.conf.json
-      - name: Install bundle and verify packaged sensors
+      - name: Install bundle and execute packaged sensor reader
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -112,13 +122,13 @@ jobs:
             (Join-Path $env:ProgramFiles 'NEXO Support')
           ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
 
-          $mainDll = $null
-          for ($attempt = 1; $attempt -le 15 -and -not $mainDll; $attempt++) {
+          $reader = $null
+          for ($attempt = 1; $attempt -le 20 -and -not $reader; $attempt++) {
             foreach ($root in $candidateRoots) {
-              $mainDll = Get-ChildItem $root -Recurse -Filter 'LibreHardwareMonitorLib.dll' -File -ErrorAction SilentlyContinue | Select-Object -First 1
-              if ($mainDll) { break }
+              $reader = Get-ChildItem $root -Recurse -Filter 'Nexo.SensorReader.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($reader) { break }
             }
-            if (-not $mainDll) { Start-Sleep -Seconds 1 }
+            if (-not $reader) { Start-Sleep -Seconds 1 }
           }
 
           $tree = foreach ($root in $candidateRoots) {
@@ -128,13 +138,15 @@ jobs:
           $tree | Set-Content -Path installed-package-tree.log -Encoding utf8
           $tree | Select-Object -First 250 | ForEach-Object { Write-Host $_ }
 
-          if (-not $mainDll) { throw 'Installed app does not contain LibreHardwareMonitorLib.dll in any NSIS install location.' }
-          $sensorDirectory = $mainDll.Directory.FullName
-          $hidDll = Get-ChildItem $sensorDirectory -Filter 'HidSharp.dll' -File -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $hidDll) { throw "Installed sensor directory does not contain HidSharp.dll: $sensorDirectory" }
-          $dllCount = @(Get-ChildItem $sensorDirectory -Filter '*.dll' -File).Count
-          if ($dllCount -lt 4) { throw "Installed sensor directory is incomplete: $dllCount DLLs at $sensorDirectory." }
-          Write-Host "Installed sensor bundle verified at $sensorDirectory with $dllCount DLLs."
+          if (-not $reader) { throw 'Installed app does not contain Nexo.SensorReader.exe.' }
+          $readerDirectory = $reader.Directory.FullName
+          if (-not (Test-Path (Join-Path $readerDirectory 'LibreHardwareMonitorLib.dll'))) { throw "Installed helper is missing LibreHardwareMonitorLib.dll: $readerDirectory" }
+          $probePath = Join-Path $env:RUNNER_TEMP 'sensor-installed-probe.json'
+          $readerProcess = Start-Process -FilePath $reader.FullName -ArgumentList @('--output', $probePath) -Wait -PassThru -NoNewWindow
+          if ($readerProcess.ExitCode -ne 0) { throw "Installed sensor reader exited with code $($readerProcess.ExitCode)." }
+          $probe = Get-Content $probePath -Raw | ConvertFrom-Json
+          if ($probe.source -ne 'native-helper') { throw "Installed helper returned unexpected source: $($probe.source)" }
+          Write-Host "Installed sensor reader verified at $readerDirectory with $(@($probe.sensors).Count) readings."
 
           foreach ($root in $candidateRoots) {
             Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
