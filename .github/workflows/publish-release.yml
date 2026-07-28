@@ -90,6 +90,51 @@ jobs:
           uploadUpdaterSignatures: true
           retryAttempts: 2
 
+      - name: Verify published updater feed
+        id: verify_updater
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifestUrl = "https://github.com/${{ github.repository }}/releases/download/v$env:NEXO_VERSION/latest.json"
+          $manifest = $null
+          for ($attempt = 1; $attempt -le 18; $attempt++) {
+            try {
+              $response = Invoke-WebRequest -Uri $manifestUrl -UseBasicParsing -MaximumRedirection 10 -TimeoutSec 30
+              if ($response.StatusCode -eq 200) {
+                $manifest = $response.Content | ConvertFrom-Json
+                break
+              }
+            } catch {
+              if ($attempt -eq 18) { throw }
+            }
+            Start-Sleep -Seconds 5
+          }
+          if ($null -eq $manifest) { throw 'latest.json was not published.' }
+          if ($manifest.version -ne $env:NEXO_VERSION) {
+            throw "latest.json version $($manifest.version) does not match $env:NEXO_VERSION."
+          }
+          $windows = @($manifest.platforms.PSObject.Properties | Where-Object { $_.Name -match '^windows-x86_64' })
+          if ($windows.Count -eq 0) { throw 'latest.json has no Windows x86_64 updater entry.' }
+          $entry = $windows[0]
+          if ([string]::IsNullOrWhiteSpace($entry.Value.url)) { throw 'Windows updater URL is empty.' }
+          if ([string]::IsNullOrWhiteSpace($entry.Value.signature)) { throw 'Windows updater signature is empty.' }
+          $asset = Invoke-WebRequest -Uri $entry.Value.url -Method Head -UseBasicParsing -MaximumRedirection 10 -TimeoutSec 30
+          if ($asset.StatusCode -lt 200 -or $asset.StatusCode -ge 400) {
+            throw "Windows updater asset returned HTTP $($asset.StatusCode)."
+          }
+          $probe = [ordered]@{
+            manifestUrl = $manifestUrl
+            version = $manifest.version
+            platform = $entry.Name
+            assetUrl = $entry.Value.url
+            signatureLength = $entry.Value.signature.Length
+            assetStatus = $asset.StatusCode
+            checkedAt = (Get-Date).ToUniversalTime().ToString('o')
+            manifest = $manifest
+          } | ConvertTo-Json -Depth 12
+          Set-Content -Path updater-probe.json -Value $probe -Encoding utf8
+          "UPDATER_PLATFORM=$($entry.Name)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Record production release status
         if: always()
         uses: actions/github-script@v7
@@ -97,8 +142,10 @@ jobs:
           RELEASE_STATUS: ${{ job.status }}
           RELEASE_VERSION: ${{ env.NEXO_VERSION }}
           RELEASE_URL: ${{ steps.publish_release.outputs.releaseHtmlUrl }}
+          UPDATER_PLATFORM: ${{ env.UPDATER_PLATFORM }}
         with:
           script: |
+            const fs = require('fs');
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const branch = 'release-status';
@@ -110,12 +157,18 @@ jobs:
             } catch (error) {
               if (error.status !== 404) throw error;
             }
+            let updaterProbe = null;
+            if (fs.existsSync('updater-probe.json')) {
+              updaterProbe = JSON.parse(fs.readFileSync('updater-probe.json', 'utf8').replace(/^\uFEFF/, ''));
+            }
             const payload = {
               version: process.env.RELEASE_VERSION || null,
               status: process.env.RELEASE_STATUS,
               runId: String(context.runId),
               commit: context.sha,
               releaseUrl: process.env.RELEASE_URL || null,
+              updaterPlatform: process.env.UPDATER_PLATFORM || null,
+              updaterProbe,
               recordedAt: new Date().toISOString()
             };
             await github.rest.repos.createOrUpdateFileContents({
