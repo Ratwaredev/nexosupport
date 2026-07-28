@@ -31,24 +31,33 @@ pub fn exit_app(app: AppHandle) {
 #[tauri::command]
 pub fn open_admin_window(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("admin") {
-        let _ = window.unminimize();
-        let _ = window.show();
+        window.unminimize().map_err(|error| error.to_string())?;
+        window.show().map_err(|error| error.to_string())?;
         return window.set_focus().map_err(|error| error.to_string());
     }
 
-    WebviewWindowBuilder::new(
+    let window = WebviewWindowBuilder::new(
         &app,
         "admin",
-        WebviewUrl::App("index.html?view=admin".into()),
+        WebviewUrl::App("admin.html".into()),
     )
     .title("NEXO Control")
     .inner_size(1180.0, 760.0)
     .min_inner_size(940.0, 640.0)
     .resizable(true)
+    .maximizable(true)
+    .minimizable(true)
+    .closable(true)
+    .decorations(true)
+    .transparent(false)
+    .skip_taskbar(false)
+    .visible(false)
     .center()
     .build()
-    .map(|_| ())
-    .map_err(|error| error.to_string())
+    .map_err(|error| format!("No pude crear NEXO Control: {error}"))?;
+
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
