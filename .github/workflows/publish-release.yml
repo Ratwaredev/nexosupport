@@ -115,7 +115,12 @@ jobs:
               try {
                 $response = Invoke-WebRequest -Uri $manifestUrl -UseBasicParsing -MaximumRedirection 10 -TimeoutSec 30
                 if ($response.StatusCode -eq 200) {
-                  $manifest = $response.Content | ConvertFrom-Json
+                  $raw = if ($response.Content -is [byte[]]) {
+                    [System.Text.Encoding]::UTF8.GetString($response.Content)
+                  } else {
+                    [string]$response.Content
+                  }
+                  $manifest = $raw | ConvertFrom-Json
                   break
                 }
               } catch {
