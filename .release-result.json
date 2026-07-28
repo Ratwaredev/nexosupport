@@ -1,36 +1,36 @@
 {
-  "version": "0.3.32",
+  "version": "0.3.33",
   "status": "success",
-  "runId": "30322580563",
-  "commit": "01b7e884c289cf54e07d627535b8e55f74183e4a",
-  "releaseUrl": "https://github.com/Ratwaredev/underdocksoporteapp/releases/tag/v0.3.32",
+  "runId": "30325459178",
+  "commit": "8eadbfe3b07309f0b877c2173505b5fae2783683",
+  "releaseUrl": "https://github.com/Ratwaredev/underdocksoporteapp/releases/tag/v0.3.33",
   "updaterPlatform": "windows-x86_64-nsis",
   "updaterProbe": {
     "ok": true,
-    "manifestUrl": "https://github.com/Ratwaredev/underdocksoporteapp/releases/download/v0.3.32/latest.json",
-    "expectedVersion": "0.3.32",
-    "version": "0.3.32",
+    "manifestUrl": "https://github.com/Ratwaredev/underdocksoporteapp/releases/download/v0.3.33/latest.json",
+    "expectedVersion": "0.3.33",
+    "version": "0.3.33",
     "platform": "windows-x86_64-nsis",
-    "assetUrl": "https://github.com/Ratwaredev/underdocksoporteapp/releases/download/v0.3.32/NEXO.Support_0.3.32_x64-setup.exe",
+    "assetUrl": "https://github.com/Ratwaredev/underdocksoporteapp/releases/download/v0.3.33/NEXO.Support_0.3.33_x64-setup.exe",
     "signatureLength": 424,
-    "assetBytes": 3226834,
+    "assetBytes": 3225772,
     "error": null,
-    "checkedAt": "2026-07-28T02:18:27.9248402Z",
+    "checkedAt": "2026-07-28T03:19:14.6581398Z",
     "manifest": {
-      "version": "0.3.32",
+      "version": "0.3.33",
       "notes": "Actualización automática desde main.\n\n- Interfaz inicial simplificada.\n- Inicio inmediato del diagnóstico.\n- Mejoras generales de NEXO Support.",
-      "pub_date": "2026-07-28T02:18:26.088Z",
+      "pub_date": "2026-07-28T03:19:12.809Z",
       "platforms": {
         "windows-x86_64": {
-          "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNmRLdjZsRGxEam9rTWdSU0hvZCtuZWpQQ0xvcnNzaDNDSSt6WUhTdUFwV3FMb3kySjNTb01GNzZUR29qTzNyeXBhbU4vL0JFY040dGp0N2gwRWRWT09GaUl0WVFSZndrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1MjA1MTAzCWZpbGU6TkVYTyBTdXBwb3J0XzAuMy4zMl94NjQtc2V0dXAuZXhlClJxOTV0Z2gzeW9Cd0paM3RUVnJUVFpvSEczWlVjZkhtWlI1YVh5Y3FBV2ErZDhaaGRwc2ZuYUxQK3B3dUYxRXpSUktBbExWcEtXa1h6ekpFd0dSMENBPT0K",
-          "url": "https://github.com/Ratwaredev/underdocksoporteapp/releases/download/v0.3.32/NEXO.Support_0.3.32_x64-setup.exe"
+          "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNmRLdjZsRGxEam1jTGdLVThEdDN5Y2VSakg0NW5nWUZGNHQ2VElDT3c5SFhLSlJ3cDU4OGp1Z3pEcFl5R2lsYk5wR3FOQUM2S0U0MHpwaHZwbjVPZzlWTjFZOWhMbmdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1MjA4NzUwCWZpbGU6TkVYTyBTdXBwb3J0XzAuMy4zM194NjQtc2V0dXAuZXhlClpybmdiZWRHNzhWRFVIazZjbm01bWtNSEpoSUtUUkpmYU9XVXZPODVnZUlwNlprTHZzMWNKZ0x4a1pBSjJRNlIzVnB1SjRUdWxnUWljYTlLQ0tGQUNBPT0K",
+          "url": "https://github.com/Ratwaredev/underdocksoporteapp/releases/download/v0.3.33/NEXO.Support_0.3.33_x64-setup.exe"
         },
         "windows-x86_64-nsis": {
-          "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNmRLdjZsRGxEam9rTWdSU0hvZCtuZWpQQ0xvcnNzaDNDSSt6WUhTdUFwV3FMb3kySjNTb01GNzZUR29qTzNyeXBhbU4vL0JFY040dGp0N2gwRWRWT09GaUl0WVFSZndrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1MjA1MTAzCWZpbGU6TkVYTyBTdXBwb3J0XzAuMy4zMl94NjQtc2V0dXAuZXhlClJxOTV0Z2gzeW9Cd0paM3RUVnJUVFpvSEczWlVjZkhtWlI1YVh5Y3FBV2ErZDhaaGRwc2ZuYUxQK3B3dUYxRXpSUktBbExWcEtXa1h6ekpFd0dSMENBPT0K",
-          "url": "https://github.com/Ratwaredev/underdocksoporteapp/releases/download/v0.3.32/NEXO.Support_0.3.32_x64-setup.exe"
+          "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNmRLdjZsRGxEam1jTGdLVThEdDN5Y2VSakg0NW5nWUZGNHQ2VElDT3c5SFhLSlJ3cDU4OGp1Z3pEcFl5R2lsYk5wR3FOQUM2S0U0MHpwaHZwbjVPZzlWTjFZOWhMbmdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1MjA4NzUwCWZpbGU6TkVYTyBTdXBwb3J0XzAuMy4zM194NjQtc2V0dXAuZXhlClpybmdiZWRHNzhWRFVIazZjbm01bWtNSEpoSUtUUkpmYU9XVXZPODVnZUlwNlprTHZzMWNKZ0x4a1pBSjJRNlIzVnB1SjRUdWxnUWljYTlLQ0tGQUNBPT0K",
+          "url": "https://github.com/Ratwaredev/underdocksoporteapp/releases/download/v0.3.33/NEXO.Support_0.3.33_x64-setup.exe"
         }
       }
     }
   },
-  "recordedAt": "2026-07-28T02:18:28.358Z"
+  "recordedAt": "2026-07-28T03:19:15.081Z"
 }
