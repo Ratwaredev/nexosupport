@@ -12,7 +12,7 @@ export type HardwareSensor = {
 
 export type HardwareSnapshot = {
   generatedAt: string;
-  source: 'libre-hardware-monitor' | 'acpi-fallback' | 'browser-demo';
+  source: 'native-helper' | 'libre-hardware-monitor' | 'acpi-fallback' | 'browser-demo' | 'unavailable';
   elevated: boolean;
   permissionRequired: boolean;
   note: string;
@@ -31,9 +31,7 @@ export type SensorSummary = {
 };
 
 export async function readHardwareSensors(elevated = false): Promise<HardwareSnapshot> {
-  if (isTauriRuntime()) {
-    return safeInvoke<HardwareSnapshot>('read_hardware_sensors', { elevated });
-  }
+  if (isTauriRuntime()) return safeInvoke<HardwareSnapshot>('read_hardware_sensors', { elevated });
   await new Promise((resolve) => setTimeout(resolve, 650));
   return {
     generatedAt: new Date().toISOString(),
@@ -44,7 +42,7 @@ export async function readHardwareSensors(elevated = false): Promise<HardwareSna
     sensors: [
       { hardwareType: 'Cpu', hardwareName: 'Procesador demo', sensorType: 'Temperature', sensorName: 'CPU Package', value: 48 },
       { hardwareType: 'Cpu', hardwareName: 'Procesador demo', sensorType: 'Load', sensorName: 'CPU Total', value: 22 },
-      { hardwareType: 'GpuNvidia', hardwareName: 'GPU demo', sensorType: 'Temperature', sensorName: 'GPU Core', value: 45 },
+      { hardwareType: 'GpuAmd', hardwareName: 'GPU demo', sensorType: 'Temperature', sensorName: 'GPU Core', value: 45 },
       { hardwareType: 'Storage', hardwareName: 'SSD demo', sensorType: 'Temperature', sensorName: 'Temperature', value: 39 }
     ]
   };
@@ -59,8 +57,10 @@ export function summarizeHardware(snapshot: HardwareSnapshot): SensorSummary {
   const type = (sensor: HardwareSensor) => sensor.hardwareType.toLowerCase();
   const sensorType = (sensor: HardwareSensor) => sensor.sensorType.toLowerCase();
   const name = (sensor: HardwareSensor) => `${sensor.hardwareName} ${sensor.sensorName}`.toLowerCase();
+  const cpuTemperatures = snapshot.sensors.filter((sensor) => type(sensor).includes('cpu') && sensorType(sensor) === 'temperature');
+  const preferredCpu = firstValue(snapshot, (sensor) => type(sensor).includes('cpu') && sensorType(sensor) === 'temperature' && /(package|tdie|tctl|core|max|ccd)/.test(name(sensor)));
   return {
-    cpuTemperatureC: firstValue(snapshot, (sensor) => type(sensor).includes('cpu') && sensorType(sensor) === 'temperature' && /(package|tdie|tctl|core|max)/.test(name(sensor))),
+    cpuTemperatureC: preferredCpu ?? (cpuTemperatures.length ? Math.max(...cpuTemperatures.map((sensor) => sensor.value)) : null),
     gpuTemperatureC: firstValue(snapshot, (sensor) => type(sensor).includes('gpu') && sensorType(sensor) === 'temperature'),
     storageTemperatureC: firstValue(snapshot, (sensor) => type(sensor).includes('storage') && sensorType(sensor) === 'temperature'),
     cpuLoadPercent: firstValue(snapshot, (sensor) => type(sensor).includes('cpu') && sensorType(sensor) === 'load' && /(total|cpu total|max)/.test(name(sensor))),
