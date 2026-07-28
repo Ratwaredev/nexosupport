@@ -66,9 +66,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-          VITE_NEXO_API_URL: ${{ secrets.VITE_NEXO_API_URL }}
           VITE_DEFAULT_ORG_NAME: ${{ secrets.VITE_DEFAULT_ORG_NAME }}
           VITE_REMOTE_TOOL_URL: ${{ secrets.VITE_REMOTE_TOOL_URL }}
           VITE_LOCAL_ADMIN_EMAIL: ${{ secrets.VITE_LOCAL_ADMIN_EMAIL }}
@@ -80,9 +77,9 @@ jobs:
           releaseBody: |
             Actualización automática desde main.
 
-            - Interfaz inicial simplificada.
-            - Inicio inmediato del diagnóstico.
-            - Mejoras generales de NEXO Support.
+            - Ejecución local estable, sin depender de un backend todavía no desplegado.
+            - Sesión de Francisco y NEXO Control restauradas automáticamente.
+            - Diagnóstico, sensores y acciones disponibles aunque no haya Internet.
           releaseDraft: false
           prerelease: false
           updaterJsonPreferNsis: true
@@ -191,6 +188,7 @@ jobs:
               releaseUrl: process.env.RELEASE_URL || null,
               updaterPlatform: process.env.UPDATER_PLATFORM || null,
               updaterProbe,
+              runtimeMode: 'local',
               recordedAt: new Date().toISOString()
             };
             await github.rest.repos.createOrUpdateFileContents({
