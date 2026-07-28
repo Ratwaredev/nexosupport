@@ -94,21 +94,56 @@ jobs:
       - name: Install bundle and verify packaged sensors
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $installer = Get-ChildItem 'src-tauri\target\release\bundle\nsis\*.exe' | Select-Object -First 1
           if (-not $installer) { throw 'Windows installer was not generated.' }
-          $installRoot = Join-Path $env:RUNNER_TEMP 'nexo-package-check'
-          Remove-Item $installRoot -Recurse -Force -ErrorAction SilentlyContinue
-          & $installer.FullName /S "/D=$installRoot"
-          if ($LASTEXITCODE -ne 0) { throw "Silent installer failed with code $LASTEXITCODE." }
-          $mainDll = Get-ChildItem $installRoot -Recurse -Filter 'LibreHardwareMonitorLib.dll' -File | Select-Object -First 1
-          $hidDll = Get-ChildItem $installRoot -Recurse -Filter 'HidSharp.dll' -File | Select-Object -First 1
-          if (-not $mainDll) { throw 'Installed app does not contain LibreHardwareMonitorLib.dll.' }
-          if (-not $hidDll) { throw 'Installed app does not contain HidSharp.dll.' }
+
+          $requestedRoot = Join-Path $env:RUNNER_TEMP 'nexo-package-check'
+          Remove-Item $requestedRoot -Recurse -Force -ErrorAction SilentlyContinue
+          $process = Start-Process -FilePath $installer.FullName -ArgumentList @('/S', "/D=$requestedRoot") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Silent installer failed with code $($process.ExitCode)." }
+
+          $candidateRoots = @(
+            $requestedRoot,
+            (Join-Path $env:LOCALAPPDATA 'NEXO Support'),
+            (Join-Path $env:LOCALAPPDATA 'Programs\NEXO Support'),
+            (Join-Path $env:ProgramFiles 'NEXO Support')
+          ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+
+          $mainDll = $null
+          for ($attempt = 1; $attempt -le 15 -and -not $mainDll; $attempt++) {
+            foreach ($root in $candidateRoots) {
+              $mainDll = Get-ChildItem $root -Recurse -Filter 'LibreHardwareMonitorLib.dll' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($mainDll) { break }
+            }
+            if (-not $mainDll) { Start-Sleep -Seconds 1 }
+          }
+
+          $tree = foreach ($root in $candidateRoots) {
+            "ROOT: $root"
+            Get-ChildItem $root -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+          }
+          $tree | Set-Content -Path installed-package-tree.log -Encoding utf8
+          $tree | Select-Object -First 250 | ForEach-Object { Write-Host $_ }
+
+          if (-not $mainDll) { throw 'Installed app does not contain LibreHardwareMonitorLib.dll in any NSIS install location.' }
           $sensorDirectory = $mainDll.Directory.FullName
+          $hidDll = Get-ChildItem $sensorDirectory -Filter 'HidSharp.dll' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $hidDll) { throw "Installed sensor directory does not contain HidSharp.dll: $sensorDirectory" }
           $dllCount = @(Get-ChildItem $sensorDirectory -Filter '*.dll' -File).Count
-          if ($dllCount -lt 4) { throw "Installed sensor directory is incomplete: $dllCount DLLs." }
+          if ($dllCount -lt 4) { throw "Installed sensor directory is incomplete: $dllCount DLLs at $sensorDirectory." }
           Write-Host "Installed sensor bundle verified at $sensorDirectory with $dllCount DLLs."
-          Remove-Item $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+
+          foreach ($root in $candidateRoots) {
+            Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+          }
+      - name: Upload installed package diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexo-installed-package-tree
+          path: installed-package-tree.log
+          if-no-files-found: ignore
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
