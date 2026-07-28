@@ -16,23 +16,23 @@ try {
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
   await page.getByPlaceholder('Código de activación').fill('DEMO-PAIR');
   await page.getByRole('button', { name: 'Continuar' }).click();
-  await waitForText(page, '¿Qué querés hacer?');
+  await waitForText(page, '¿Cómo querés usar NEXO?');
 
   await page.getByRole('button', { name: /Proteger esta PC/ }).click();
   await waitForText(page, 'PC vinculada', 25_000);
-  await waitForText(page, 'Estado del equipo', 25_000);
+  await waitForText(page, 'ESTADO DE TU PC', 25_000);
 
   const quickActions = page.locator('.nv2-quick-actions');
-  await quickActions.getByRole('button', { name: 'Revisar' }).click();
+  await quickActions.getByRole('button', { name: /Revisar/ }).click();
   await waitForText(page, 'Revisión terminada', 25_000);
 
-  await quickActions.getByRole('button', { name: 'Internet' }).click();
+  await quickActions.getByRole('button', { name: /Internet/ }).click();
   await waitForText(page, 'La conexión responde correctamente', 20_000);
 
-  await quickActions.getByRole('button', { name: 'Temperatura' }).click();
+  await quickActions.getByRole('button', { name: /Temperatura/ }).click();
   await waitForText(page, 'Temperatura revisada', 20_000);
 
-  await quickActions.getByRole('button', { name: 'Técnico' }).click();
+  await quickActions.getByRole('button', { name: /Técnico/ }).click();
   await waitForText(page, 'Soporte preparado', 20_000);
 
   if (pageErrors.length) {
@@ -44,7 +44,7 @@ try {
   await waitForText(admin, 'Administración');
   await admin.getByRole('button', { name: 'Entrar' }).waitFor({ state: 'visible' });
 
-  console.log('NEXO UI smoke passed: activation, protection, review, Internet, temperature, support and admin entry.');
+  console.log('NEXO UI smoke passed: minimal home, activation, review, Internet, temperature, support and admin entry.');
   await context.close();
 } finally {
   await browser.close();
