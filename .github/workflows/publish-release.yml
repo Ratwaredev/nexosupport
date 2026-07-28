@@ -96,44 +96,61 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $manifestUrl = "https://github.com/${{ github.repository }}/releases/download/v$env:NEXO_VERSION/latest.json"
-          $manifest = $null
-          for ($attempt = 1; $attempt -le 18; $attempt++) {
-            try {
-              $response = Invoke-WebRequest -Uri $manifestUrl -UseBasicParsing -MaximumRedirection 10 -TimeoutSec 30
-              if ($response.StatusCode -eq 200) {
-                $manifest = $response.Content | ConvertFrom-Json
-                break
-              }
-            } catch {
-              if ($attempt -eq 18) { throw }
-            }
-            Start-Sleep -Seconds 5
-          }
-          if ($null -eq $manifest) { throw 'latest.json was not published.' }
-          if ($manifest.version -ne $env:NEXO_VERSION) {
-            throw "latest.json version $($manifest.version) does not match $env:NEXO_VERSION."
-          }
-          $windows = @($manifest.platforms.PSObject.Properties | Where-Object { $_.Name -match '^windows-x86_64' })
-          if ($windows.Count -eq 0) { throw 'latest.json has no Windows x86_64 updater entry.' }
-          $entry = $windows[0]
-          if ([string]::IsNullOrWhiteSpace($entry.Value.url)) { throw 'Windows updater URL is empty.' }
-          if ([string]::IsNullOrWhiteSpace($entry.Value.signature)) { throw 'Windows updater signature is empty.' }
-          $asset = Invoke-WebRequest -Uri $entry.Value.url -Method Head -UseBasicParsing -MaximumRedirection 10 -TimeoutSec 30
-          if ($asset.StatusCode -lt 200 -or $asset.StatusCode -ge 400) {
-            throw "Windows updater asset returned HTTP $($asset.StatusCode)."
-          }
           $probe = [ordered]@{
+            ok = $false
             manifestUrl = $manifestUrl
-            version = $manifest.version
-            platform = $entry.Name
-            assetUrl = $entry.Value.url
-            signatureLength = $entry.Value.signature.Length
-            assetStatus = $asset.StatusCode
+            expectedVersion = $env:NEXO_VERSION
+            version = $null
+            platform = $null
+            assetUrl = $null
+            signatureLength = 0
+            assetBytes = 0
+            error = $null
             checkedAt = (Get-Date).ToUniversalTime().ToString('o')
-            manifest = $manifest
-          } | ConvertTo-Json -Depth 12
-          Set-Content -Path updater-probe.json -Value $probe -Encoding utf8
-          "UPDATER_PLATFORM=$($entry.Name)" | Out-File -FilePath $env:GITHUB_ENV -Append
+            manifest = $null
+          }
+          try {
+            $manifest = $null
+            for ($attempt = 1; $attempt -le 18; $attempt++) {
+              try {
+                $response = Invoke-WebRequest -Uri $manifestUrl -UseBasicParsing -MaximumRedirection 10 -TimeoutSec 30
+                if ($response.StatusCode -eq 200) {
+                  $manifest = $response.Content | ConvertFrom-Json
+                  break
+                }
+              } catch {
+                if ($attempt -eq 18) { throw }
+              }
+              Start-Sleep -Seconds 5
+            }
+            if ($null -eq $manifest) { throw 'latest.json was not published.' }
+            $probe.version = $manifest.version
+            $probe.manifest = $manifest
+            if ($manifest.version -ne $env:NEXO_VERSION) {
+              throw "latest.json version $($manifest.version) does not match $env:NEXO_VERSION."
+            }
+            $windows = @($manifest.platforms.PSObject.Properties | Where-Object { $_.Name -match '^windows-x86_64' })
+            if ($windows.Count -eq 0) { throw 'latest.json has no Windows x86_64 updater entry.' }
+            $entry = $windows | Where-Object { $_.Name -match 'nsis' } | Select-Object -First 1
+            if ($null -eq $entry) { $entry = $windows[0] }
+            $probe.platform = $entry.Name
+            $probe.assetUrl = $entry.Value.url
+            $probe.signatureLength = if ($entry.Value.signature) { $entry.Value.signature.Length } else { 0 }
+            if ([string]::IsNullOrWhiteSpace($entry.Value.url)) { throw 'Windows updater URL is empty.' }
+            if ([string]::IsNullOrWhiteSpace($entry.Value.signature)) { throw 'Windows updater signature is empty.' }
+            $assetPath = Join-Path $env:RUNNER_TEMP 'nexo-updater-asset.bin'
+            Invoke-WebRequest -Uri $entry.Value.url -OutFile $assetPath -UseBasicParsing -MaximumRedirection 10 -TimeoutSec 120
+            $probe.assetBytes = (Get-Item $assetPath).Length
+            if ($probe.assetBytes -lt 100000) { throw "Windows updater asset is unexpectedly small: $($probe.assetBytes) bytes." }
+            $probe.ok = $true
+            "UPDATER_PLATFORM=$($entry.Name)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          } catch {
+            $probe.error = $_.Exception.ToString()
+          } finally {
+            $probe.checkedAt = (Get-Date).ToUniversalTime().ToString('o')
+            $probe | ConvertTo-Json -Depth 12 | Set-Content -Path updater-probe.json -Encoding utf8
+          }
+          if (-not $probe.ok) { throw $probe.error }
 
       - name: Record production release status
         if: always()
