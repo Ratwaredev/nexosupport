@@ -23,6 +23,18 @@ jobs:
       - name: Prepare hardware sensor library
         shell: pwsh
         run: ./scripts/prepare-sensors.ps1
+      - name: Verify sensor source bundle
+        shell: pwsh
+        run: |
+          $root = Join-Path $PWD 'src-tauri\resources\sensors'
+          $required = @('LibreHardwareMonitorLib.dll', 'HidSharp.dll')
+          foreach ($name in $required) {
+            $path = Join-Path $root $name
+            if (-not (Test-Path $path)) { throw "Missing sensor dependency before build: $name" }
+          }
+          $dlls = @(Get-ChildItem $root -Filter '*.dll' -File)
+          if ($dlls.Count -lt 4) { throw "Sensor bundle is incomplete: only $($dlls.Count) DLLs." }
+          Write-Host "Sensor source bundle verified: $($dlls.Count) DLLs."
       - name: Validate frontend
         shell: pwsh
         run: |
@@ -79,6 +91,24 @@ jobs:
           if-no-files-found: ignore
       - name: Build unsigned Windows installer
         run: npm run tauri:build -- --config src-tauri/tauri.ci.conf.json
+      - name: Install bundle and verify packaged sensors
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem 'src-tauri\target\release\bundle\nsis\*.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'Windows installer was not generated.' }
+          $installRoot = Join-Path $env:RUNNER_TEMP 'nexo-package-check'
+          Remove-Item $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+          & $installer.FullName /S "/D=$installRoot"
+          if ($LASTEXITCODE -ne 0) { throw "Silent installer failed with code $LASTEXITCODE." }
+          $mainDll = Get-ChildItem $installRoot -Recurse -Filter 'LibreHardwareMonitorLib.dll' -File | Select-Object -First 1
+          $hidDll = Get-ChildItem $installRoot -Recurse -Filter 'HidSharp.dll' -File | Select-Object -First 1
+          if (-not $mainDll) { throw 'Installed app does not contain LibreHardwareMonitorLib.dll.' }
+          if (-not $hidDll) { throw 'Installed app does not contain HidSharp.dll.' }
+          $sensorDirectory = $mainDll.Directory.FullName
+          $dllCount = @(Get-ChildItem $sensorDirectory -Filter '*.dll' -File).Count
+          if ($dllCount -lt 4) { throw "Installed sensor directory is incomplete: $dllCount DLLs." }
+          Write-Host "Installed sensor bundle verified at $sensorDirectory with $dllCount DLLs."
+          Remove-Item $installRoot -Recurse -Force -ErrorAction SilentlyContinue
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
