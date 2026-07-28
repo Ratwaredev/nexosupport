@@ -52,7 +52,22 @@ internal static class Program
 
         try
         {
-            computer.Open();
+            try
+            {
+                computer.Open();
+            }
+            catch (Exception error)
+            {
+                return new HardwareSnapshot(
+                    DateTimeOffset.UtcNow.ToString("O"),
+                    "native-helper",
+                    elevated,
+                    !elevated,
+                    !elevated
+                        ? "Windows puede requerir permiso para acceder a los sensores del firmware."
+                        : $"El lector de hardware no pudo abrir los sensores: {error.GetType().Name}.",
+                    Array.Empty<HardwareSensor>());
+            }
             var visitor = new UpdateVisitor();
             computer.Accept(visitor);
             Thread.Sleep(450);
