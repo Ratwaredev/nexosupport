@@ -18,11 +18,10 @@ try {
   await page.getByRole('button', { name: 'Continuar' }).click();
   await waitForText(page, '¿Cómo querés usar NEXO?');
   await page.getByRole('button', { name: /Proteger esta PC/ }).click();
-  await waitForText(page, 'Revisemos tu PC', 25_000);
+  await waitForText(page, 'Tu PC está en orden', 30_000);
 
   await page.getByRole('button', { name: /^Revisar$/ }).click();
   await waitForText(page, 'Revisión lista', 25_000);
-  await waitForText(page, 'Tu PC está en orden', 25_000);
 
   await page.locator('.nc-actions').getByRole('button', { name: /Internet/ }).click();
   await waitForText(page, 'La conexión responde correctamente', 20_000);
