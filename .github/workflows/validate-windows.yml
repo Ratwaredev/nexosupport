@@ -40,6 +40,8 @@ jobs:
         run: |
           npm run build *>&1 | Tee-Object -FilePath frontend.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify close and update product contracts
+        run: node scripts/verify-product-contracts.mjs
       - name: Upload frontend diagnostic
         if: failure()
         uses: actions/upload-artifact@v4
