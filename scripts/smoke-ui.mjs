@@ -30,6 +30,7 @@ try {
   await waitForText(page, '¿Qué querés mejorar?');
   await page.getByRole('button', { name: /Revisar inicio/ }).click();
   await waitForText(page, 'Acción de prueba completada', 20_000);
+  await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
 
   await page.locator('.nc-readings').getByRole('button', { name: /Temp\./ }).click();
   await waitForText(page, 'Temperatura del equipo');
