@@ -32,5 +32,5 @@ pub async fn install_app_update(app: AppHandle) -> Result<(), String> {
         .await
         .map_err(|error| error.to_string())?;
 
-    Ok(())
+    app.restart();
 }

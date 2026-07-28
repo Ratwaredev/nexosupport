@@ -3,8 +3,8 @@ use tauri::{
 };
 
 #[tauri::command]
-pub fn hide_main_window(window: WebviewWindow) -> Result<(), String> {
-    window.hide().map_err(|error| error.to_string())
+pub fn hide_main_window(app: AppHandle) {
+    app.exit(0);
 }
 
 #[tauri::command]
