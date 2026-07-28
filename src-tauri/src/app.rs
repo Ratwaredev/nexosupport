@@ -19,11 +19,10 @@ pub fn run() {
                 .get_webview_window("main")
                 .expect("main window missing");
             windows::position_popup(&window);
-            let close_window = window.clone();
+            let close_app = app.handle().clone();
             window.on_window_event(move |event| {
-                if let WindowEvent::CloseRequested { api, .. } = event {
-                    api.prevent_close();
-                    let _ = close_window.hide();
+                if let WindowEvent::CloseRequested { .. } = event {
+                    close_app.exit(0);
                 }
             });
 
