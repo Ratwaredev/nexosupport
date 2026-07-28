@@ -4,10 +4,20 @@ use super::types::ThermalZoneReading;
 #[cfg(not(target_os = "windows"))]
 use chrono::Utc;
 #[cfg(target_os = "windows")]
-use std::process::Command;
+use std::{
+    process::{Command, Output, Stdio},
+    thread,
+    time::{Duration, Instant},
+};
 
 #[tauri::command]
-pub fn run_quick_diagnostic() -> Result<DiagnosticReport, String> {
+pub async fn run_quick_diagnostic() -> Result<DiagnosticReport, String> {
+    tauri::async_runtime::spawn_blocking(run_quick_diagnostic_blocking)
+        .await
+        .map_err(|error| format!("El diagnóstico se interrumpió: {error}"))?
+}
+
+fn run_quick_diagnostic_blocking() -> Result<DiagnosticReport, String> {
     #[cfg(target_os = "windows")]
     {
         let raw = run_windows_diagnostic()?;
@@ -45,24 +55,25 @@ fn run_windows_diagnostic() -> Result<String, String> {
     run_powershell(
         r#"
 $ErrorActionPreference = 'SilentlyContinue'
-$os = Get-CimInstance Win32_OperatingSystem
-$cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
-$disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
-$startupCount = (Get-CimInstance Win32_StartupCommand | Measure-Object).Count
+$ProgressPreference = 'SilentlyContinue'
+$os = Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 5
+$cpu = Get-CimInstance Win32_Processor -OperationTimeoutSec 5 | Select-Object -First 1
+$disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" -OperationTimeoutSec 5
+$startupCount = (Get-CimInstance Win32_StartupCommand -OperationTimeoutSec 5 | Measure-Object).Count
 $defender = Get-MpComputerStatus
 $pending = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
 $defenderStatus = if ($defender.AMServiceEnabled -eq $true) { 'Activo' } elseif ($null -eq $defender) { 'No detectado' } else { 'Revisar' }
 [PSCustomObject]@{
   generatedAt = (Get-Date).ToUniversalTime().ToString('o')
-  computerName = $env:COMPUTERNAME
-  userName = $env:USERNAME
-  os = ($os.Caption + ' ' + $os.Version)
-  cpu = $cpu.Name
-  ramTotalGb = [Math]::Round($os.TotalVisibleMemorySize / 1MB, 1)
-  ramFreeGb = [Math]::Round($os.FreePhysicalMemory / 1MB, 1)
-  systemDriveTotalGb = [Math]::Round($disk.Size / 1GB, 1)
-  systemDriveFreeGb = [Math]::Round($disk.FreeSpace / 1GB, 1)
-  startupItems = $startupCount
+  computerName = if ($env:COMPUTERNAME) { $env:COMPUTERNAME } else { 'Mi PC' }
+  userName = if ($env:USERNAME) { $env:USERNAME } else { 'Usuario' }
+  os = if ($os) { ($os.Caption + ' ' + $os.Version) } else { 'Windows' }
+  cpu = if ($cpu) { $cpu.Name } else { 'No detectado' }
+  ramTotalGb = if ($os) { [Math]::Round($os.TotalVisibleMemorySize / 1MB, 1) } else { 0 }
+  ramFreeGb = if ($os) { [Math]::Round($os.FreePhysicalMemory / 1MB, 1) } else { 0 }
+  systemDriveTotalGb = if ($disk) { [Math]::Round($disk.Size / 1GB, 1) } else { 0 }
+  systemDriveFreeGb = if ($disk) { [Math]::Round($disk.FreeSpace / 1GB, 1) } else { 0 }
+  startupItems = [int]$startupCount
   defenderStatus = $defenderStatus
   pendingReboot = [bool]$pending
   maxTemperatureC = $null
@@ -95,10 +106,17 @@ fn build_recommendations(report: &DiagnosticReport) -> Vec<String> {
 
 #[cfg(target_os = "windows")]
 pub fn run_powershell(script: &str) -> Result<String, String> {
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script])
-        .output()
-        .map_err(|error| format!("No se pudo ejecutar la herramienta de Windows: {error}"))?;
+    let mut command = Command::new("powershell");
+    command.args([
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script,
+    ]);
+    let output = run_command_with_timeout(command, Duration::from_secs(18), "La herramienta de Windows")?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if detail.is_empty() {
@@ -108,6 +126,40 @@ pub fn run_powershell(script: &str) -> Result<String, String> {
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(target_os = "windows")]
+pub fn run_command_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+    label: &str,
+) -> Result<Output, String> {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("No se pudo iniciar {label}: {error}"))?;
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                return child
+                    .wait_with_output()
+                    .map_err(|error| format!("No se pudo obtener el resultado de {label}: {error}"));
+            }
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("{label} tardó demasiado y fue detenida."));
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(100)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("No se pudo comprobar {label}: {error}"));
+            }
+        }
+    }
 }
 
 #[cfg(not(target_os = "windows"))]

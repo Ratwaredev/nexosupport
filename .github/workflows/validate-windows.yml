@@ -35,6 +35,36 @@ jobs:
           name: nexo-frontend-log
           path: frontend.log
           if-no-files-found: ignore
+      - name: Install browser for click smoke
+        run: |
+          npm install --no-save playwright
+          npx playwright install chromium
+      - name: Exercise popup actions and admin entry
+        shell: pwsh
+        run: |
+          $preview = Start-Process npm.cmd -ArgumentList @('run','preview','--','--host','127.0.0.1','--port','4173') -PassThru
+          try {
+            $ready = $false
+            for ($attempt = 1; $attempt -le 30; $attempt++) {
+              try {
+                $response = Invoke-WebRequest -Uri 'http://127.0.0.1:4173' -UseBasicParsing -TimeoutSec 3
+                if ($response.StatusCode -eq 200) { $ready = $true; break }
+              } catch {}
+              Start-Sleep -Seconds 1
+            }
+            if (-not $ready) { throw 'Vite preview did not start.' }
+            node scripts/smoke-ui.mjs *>&1 | Tee-Object -FilePath ui-smoke.log
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Stop-Process -Id $preview.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Upload UI smoke diagnostic
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexo-ui-smoke-log
+          path: ui-smoke.log
+          if-no-files-found: ignore
       - name: Validate Tauri backend
         shell: pwsh
         run: |

@@ -1,7 +1,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
-const isAdminView = new URLSearchParams(window.location.search).get('view') === 'admin';
+const url = new URL(window.location.href);
+const isAdminView = url.pathname.endsWith('/admin.html') || url.searchParams.get('view') === 'admin';
 
 async function start() {
   const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
@@ -17,19 +18,17 @@ async function start() {
   }
 
   await Promise.all([
-    import('./assistant.css'),
-    import('./assistant-first-run.css'),
-    import('./mode-picker.css'),
+    import('./support-v2.css'),
     import('./updater.css')
   ]);
-  const [{ default: AssistantApp }, { default: AppUpdater }] = await Promise.all([
-    import('./AssistantApp'),
+  const [{ default: SupportAppV2 }, { default: AppUpdater }] = await Promise.all([
+    import('./SupportAppV2'),
     import('./AppUpdater')
   ]);
   root.render(
     <React.StrictMode>
       <>
-        <AssistantApp />
+        <SupportAppV2 />
         <AppUpdater />
       </>
     </React.StrictMode>
