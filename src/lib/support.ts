@@ -6,6 +6,13 @@ export type RemoteSession = {
   instructions: string;
 };
 
+export type RemoteToolStatus = {
+  installed: boolean;
+  name: string;
+  path?: string | null;
+  message: string;
+};
+
 export async function createRemoteSession(): Promise<RemoteSession> {
   if (isTauriRuntime()) {
     return safeInvoke<RemoteSession>('create_remote_session');
@@ -16,14 +23,32 @@ export async function createRemoteSession(): Promise<RemoteSession> {
   return {
     code,
     expiresInMinutes: 20,
-    instructions: 'Modo demo: en build Tauri se prepara RustDesk/MeshCentral.'
+    instructions: 'Modo navegador: la sesión remota real se prepara dentro de la aplicación de Windows.'
   };
 }
 
-export async function openRemoteTool(): Promise<string> {
+export async function getRemoteToolStatus(): Promise<RemoteToolStatus> {
   if (isTauriRuntime()) {
-    return safeInvoke<string>('open_remote_tool');
+    return safeInvoke<RemoteToolStatus>('remote_tool_status');
   }
 
-  return 'Modo navegador: poné RustDesk portable en tools/rustdesk/rustdesk.exe o instalalo en Windows.';
+  return {
+    installed: false,
+    name: 'RustDesk',
+    path: null,
+    message: 'Vista previa: NEXO detecta RustDesk instalado dentro de Windows.'
+  };
+}
+
+export async function openRemoteTool(): Promise<RemoteToolStatus> {
+  if (isTauriRuntime()) {
+    return safeInvoke<RemoteToolStatus>('open_remote_tool');
+  }
+
+  return {
+    installed: false,
+    name: 'RustDesk',
+    path: null,
+    message: 'Vista previa: en Windows se abre RustDesk sin mostrar una consola.'
+  };
 }
