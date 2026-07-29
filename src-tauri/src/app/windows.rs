@@ -2,6 +2,30 @@ use tauri::{
     AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
+fn dispatch_update_check(window: &WebviewWindow, manual: bool) {
+    let event_name = if manual {
+        "nexo:check-update"
+    } else {
+        "nexo:check-update-passive"
+    };
+    let script = format!(
+        "window.dispatchEvent(new Event({event_name:?}));"
+    );
+    let _ = window.eval(&script);
+}
+
+pub fn reveal_main_window(app: &AppHandle, manual_update_check: bool) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("No encontré la ventana principal.")?;
+    position_popup(&window);
+    window.unminimize().map_err(|error| error.to_string())?;
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
+    dispatch_update_check(&window, manual_update_check);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn hide_main_window(app: AppHandle) {
     app.exit(0);
@@ -9,13 +33,7 @@ pub fn hide_main_window(app: AppHandle) {
 
 #[tauri::command]
 pub fn show_main_window(app: AppHandle) -> Result<(), String> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or("No encontré la ventana principal.")?;
-    position_popup(&window);
-    window.unminimize().map_err(|error| error.to_string())?;
-    window.show().map_err(|error| error.to_string())?;
-    window.set_focus().map_err(|error| error.to_string())
+    reveal_main_window(&app, false)
 }
 
 #[tauri::command]
@@ -89,9 +107,6 @@ pub fn toggle_popup(app: &AppHandle) {
     if window.is_visible().unwrap_or(false) {
         let _ = window.hide();
     } else {
-        position_popup(&window);
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
+        let _ = reveal_main_window(app, false);
     }
 }
