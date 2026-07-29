@@ -3,6 +3,7 @@ use rand::{distributions::Alphanumeric, Rng};
 #[cfg(target_os = "windows")]
 use std::{
     fs,
+    os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::Command,
     time::Duration,
@@ -12,6 +13,9 @@ use tauri::AppHandle;
 use tauri::{path::BaseDirectory, Manager};
 #[cfg(not(target_os = "windows"))]
 use chrono::Utc;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[tauri::command]
 pub async fn read_hardware_sensors(app: AppHandle, elevated: bool) -> Result<HardwareSnapshot, String> {
@@ -28,9 +32,9 @@ fn read_hardware_sensors_blocking(app: AppHandle, elevated: bool) -> Result<Hard
         };
 
         match run_sensor_helper(&helper, elevated) {
-            Ok(snapshot) if has_temperature(&snapshot) || snapshot.permission_required => Ok(snapshot),
+            Ok(snapshot) if has_plausible_temperature(&snapshot) || snapshot.permission_required => Ok(snapshot),
             Ok(snapshot) => match acpi_fallback(&snapshot.note) {
-                Ok(fallback) if !fallback.sensors.is_empty() => Ok(fallback),
+                Ok(fallback) if has_plausible_temperature(&fallback) => Ok(fallback),
                 _ => Ok(snapshot),
             },
             Err(error) => {
@@ -93,7 +97,10 @@ fn run_sensor_helper(helper: &Path, elevated: bool) -> Result<HardwareSnapshot, 
         run_elevated(helper, &output_path)
     } else {
         let mut command = Command::new(helper);
-        command.arg("--output").arg(&output_path);
+        command
+            .arg("--output")
+            .arg(&output_path)
+            .creation_flags(CREATE_NO_WINDOW);
         if let Some(directory) = helper.parent() {
             command.current_dir(directory);
         }
@@ -130,17 +137,20 @@ fn run_elevated(helper: &Path, output: &Path) -> Result<(), String> {
     let escaped_helper = ps_quote(helper.to_string_lossy().as_ref());
     let escaped_output = ps_quote(output.to_string_lossy().as_ref());
     let command_text = format!(
-        "$p = Start-Process -FilePath \"{escaped_helper}\" -Verb RunAs -Wait -PassThru -ArgumentList @('--output', '\"{escaped_output}\"'); exit $p.ExitCode"
+        "$p = Start-Process -FilePath \"{escaped_helper}\" -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList @('--output', '\"{escaped_output}\"'); exit $p.ExitCode"
     );
-    let mut command = Command::new("powershell");
-    command.args([
-        "-NoLogo",
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        &command_text,
-    ]);
+    let mut command = Command::new("powershell.exe");
+    command
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &command_text,
+        ])
+        .creation_flags(CREATE_NO_WINDOW);
     let result = super::diagnostics::run_command_with_timeout(
         command,
         Duration::from_secs(140),
@@ -154,11 +164,13 @@ fn run_elevated(helper: &Path, output: &Path) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
-fn has_temperature(snapshot: &HardwareSnapshot) -> bool {
-    snapshot
-        .sensors
-        .iter()
-        .any(|sensor| sensor.sensor_type.eq_ignore_ascii_case("temperature"))
+fn has_plausible_temperature(snapshot: &HardwareSnapshot) -> bool {
+    snapshot.sensors.iter().any(|sensor| {
+        sensor.sensor_type.eq_ignore_ascii_case("temperature")
+            && sensor.value.is_finite()
+            && sensor.value >= 5.0
+            && sensor.value <= 125.0
+    })
 }
 
 #[cfg(target_os = "windows")]
@@ -174,7 +186,10 @@ $zones = @()
 try {
   $zones = Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -OperationTimeoutSec 5 | ForEach-Object {
     if ($null -ne $_.CurrentTemperature) {
-      [PSCustomObject]@{ hardwareType = 'Mainboard'; hardwareName = 'ACPI'; sensorType = 'Temperature'; sensorName = $_.InstanceName; value = [Math]::Round(($_.CurrentTemperature / 10) - 273.15, 1); min = $null; max = $null }
+      $value = [Math]::Round(($_.CurrentTemperature / 10) - 273.15, 1)
+      if ($value -ge 5 -and $value -le 125) {
+        [PSCustomObject]@{ hardwareType = 'Mainboard'; hardwareName = 'ACPI'; sensorType = 'Temperature'; sensorName = $_.InstanceName; value = $value; min = $null; max = $null }
+      }
     }
   }
 } catch {}
