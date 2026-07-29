@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - forge-temp-installer-v026
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
