@@ -23,6 +23,10 @@ jobs:
           node-version: 24
           cache: npm
 
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Rust cache
@@ -33,19 +37,71 @@ jobs:
       - name: Set unique release version
         shell: pwsh
         run: |
-          $version = "0.3.${{ github.run_number }}"
+          $version = "0.4.${{ github.run_number }}"
           node scripts/set-release-version.mjs $version
           "NEXO_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Prepare hardware sensor library
+      - name: Build native sensor reader
         shell: pwsh
         run: ./scripts/prepare-sensors.ps1
 
+      - name: Verify native sensor reader
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $PWD 'src-tauri\resources\sensor-helper'
+          $reader = Join-Path $root 'Nexo.SensorReader.exe'
+          if (-not (Test-Path $reader)) { throw 'Missing Nexo.SensorReader.exe before release.' }
+          if (-not (Test-Path (Join-Path $root 'LibreHardwareMonitorLib.dll'))) { throw 'Missing LibreHardwareMonitorLib.dll before release.' }
+          $probePath = Join-Path $env:RUNNER_TEMP 'sensor-release-probe.json'
+          $process = Start-Process -FilePath $reader -ArgumentList @('--output', $probePath) -Wait -PassThru -NoNewWindow
+          if ($process.ExitCode -ne 0) { throw "Sensor reader exited with code $($process.ExitCode)." }
+          $probe = Get-Content $probePath -Raw | ConvertFrom-Json
+          if ($probe.source -ne 'native-helper') { throw "Unexpected sensor source: $($probe.source)" }
+          $invalidTemperatures = @($probe.sensors | Where-Object { $_.sensorType -eq 'Temperature' -and ($_.value -lt 5 -or $_.value -gt 125) })
+          if ($invalidTemperatures.Count -gt 0) { throw 'Sensor reader returned an impossible temperature.' }
+
       - name: Validate frontend
         run: npm run build
+
+      - name: Verify product contracts
+        run: node scripts/verify-product-contracts.mjs
+
+      - name: Install browser for release smoke
+        run: |
+          npm install --no-save playwright
+          npx playwright install chromium
+
+      - name: Validate production UI before publishing
+        shell: pwsh
+        run: |
+          $preview = Start-Process npm.cmd -ArgumentList @('run','preview','--','--host','127.0.0.1','--port','4173') -PassThru
+          try {
+            $ready = $false
+            for ($attempt = 1; $attempt -le 30; $attempt++) {
+              try {
+                $response = Invoke-WebRequest -Uri 'http://127.0.0.1:4173' -UseBasicParsing -TimeoutSec 3
+                if ($response.StatusCode -eq 200) { $ready = $true; break }
+              } catch {}
+              Start-Sleep -Seconds 1
+            }
+            if (-not $ready) { throw 'Vite preview did not start.' }
+            node scripts/smoke-ui.mjs
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Stop-Process -Id $preview.Id -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Upload release UI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexo-release-ui-evidence
+          path: artifacts/ui/*.png
+          if-no-files-found: warn
 
       - name: Validate Tauri backend
         run: cargo check --manifest-path src-tauri/Cargo.toml
@@ -75,11 +131,15 @@ jobs:
           tagName: v__VERSION__
           releaseName: NEXO Support v__VERSION__
           releaseBody: |
-            Actualización automática desde main.
+            Actualización profesional de NEXO Support.
 
-            - Ejecución local estable, sin depender de un backend todavía no desplegado.
-            - Sesión de Francisco y NEXO Control restauradas automáticamente.
-            - Diagnóstico, sensores y acciones disponibles aunque no haya Internet.
+            - Interfaz compacta, alineada y con feedback visible por acción.
+            - Diagnósticos y mantenimiento ejecutados fuera del hilo de interfaz.
+            - PowerShell y herramientas nativas sin ventanas de consola.
+            - Temperaturas imposibles descartadas y lecturas ACPI marcadas como aproximadas.
+            - NEXO Control abre de forma confiable.
+            - Detección y apertura de RustDesk instalado para escritorio remoto autorizado.
+            - Release bloqueado automáticamente si falla el build, los contratos o las pruebas visuales.
           releaseDraft: false
           prerelease: false
           updaterJsonPreferNsis: true
