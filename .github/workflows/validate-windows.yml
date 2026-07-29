@@ -44,7 +44,9 @@ jobs:
           $probe = Get-Content $probePath -Raw | ConvertFrom-Json
           if ($probe.source -ne 'native-helper') { throw "Unexpected sensor source: $($probe.source)" }
           if ($null -eq $probe.sensors) { throw 'Sensor reader did not return a sensors array.' }
-          Write-Host "Sensor reader executed successfully with $(@($probe.sensors).Count) readings."
+          $invalidTemperatures = @($probe.sensors | Where-Object { $_.sensorType -eq 'Temperature' -and ($_.value -lt 5 -or $_.value -gt 125) })
+          if ($invalidTemperatures.Count -gt 0) { throw "Sensor reader returned impossible temperatures: $($invalidTemperatures | ConvertTo-Json -Compress)" }
+          Write-Host "Sensor reader executed successfully with $(@($probe.sensors).Count) valid readings."
       - name: Validate frontend
         shell: pwsh
         run: |
@@ -63,7 +65,7 @@ jobs:
         run: |
           npm install --no-save playwright
           npx playwright install chromium
-      - name: Exercise compact popup actions and admin entry
+      - name: Exercise compact popup, remote flow and admin entry
         shell: pwsh
         run: |
           $preview = Start-Process npm.cmd -ArgumentList @('run','preview','--','--host','127.0.0.1','--port','4173') -PassThru
@@ -82,6 +84,13 @@ jobs:
           } finally {
             Stop-Process -Id $preview.Id -Force -ErrorAction SilentlyContinue
           }
+      - name: Upload UI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexo-ui-evidence
+          path: artifacts/ui/*.png
+          if-no-files-found: warn
       - name: Upload UI smoke diagnostic
         if: failure()
         uses: actions/upload-artifact@v4
