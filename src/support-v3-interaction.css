@@ -1,0 +1,7 @@
+.nc-toast {
+  pointer-events: none;
+}
+
+.nc-toast button {
+  pointer-events: auto;
+}
