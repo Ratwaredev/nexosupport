@@ -1,4 +1,4 @@
-name: Forge temporary runner check
+name: Forge private checkout check
 
 on:
   push:
@@ -12,7 +12,22 @@ permissions:
   contents: read
 
 jobs:
-  smoke:
+  checkout-private:
     runs-on: windows-latest
     steps:
-      - run: Write-Output "Forge Windows runner is available"
+      - name: Checkout temporary builder branch
+        uses: actions/checkout@v4
+
+      - name: Checkout private Forge source
+        uses: actions/checkout@v4
+        with:
+          repository: Ratwaredev/ratlab
+          ref: agent/build-v026-installer
+          token: ${{ github.token }}
+          path: forge-private
+
+      - name: Verify private checkout
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "forge-private/package.json")) { throw "Private checkout unavailable" }
+          Write-Output "Private Forge checkout available"
