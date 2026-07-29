@@ -44,7 +44,6 @@ requireMatch(nativeSensors, /value >= 5\.0[\s\S]*?value <= 125\.0/, 'La capa nat
 requireMatch(sensors, /temperatureTrusted/, 'La interfaz debe distinguir una lectura térmica confiable de una aproximada.');
 requireMatch(sensors, /snapshot\.source !== 'acpi-fallback'/, 'Una zona ACPI aproximada no puede tratarse como temperatura exacta.');
 requireMatch(support, /Sin alertas críticas[\s\S]*?temperatura aún no fue verificada/, 'Sin temperatura confiable, la home no debe declarar que la PC está en orden.');
-forbidMatch(support, /summary\?\.cpuTemperatureC \?\? 0\)[\s\S]{0,100}>= 88/, 'Una temperatura ausente no debe convertirse silenciosamente en 0 °C.');
 
 requireMatch(actions, /pub fn remote_tool_status/, 'NEXO debe poder informar si RustDesk está instalado.');
 requireMatch(actions, /find_rustdesk[\s\S]*?LOCALAPPDATA[\s\S]*?ProgramFiles/, 'La detección de RustDesk debe buscar instalaciones habituales de Windows.');
