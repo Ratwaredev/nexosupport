@@ -21,6 +21,7 @@ async function start() {
 
   await Promise.all([
     import('./support-v3.css'),
+    import('./support-v3-interaction.css'),
     import('./updater.css')
   ]);
   const [{ default: SupportAppV3 }, { default: AppUpdater }] = await Promise.all([

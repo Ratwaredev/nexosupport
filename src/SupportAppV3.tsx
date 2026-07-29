@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import {
   AlertTriangle,
@@ -33,19 +33,20 @@ import { requestAssistant } from './lib/assistant';
 import type { AssistantToolId, ProviderMessage } from './lib/assistant';
 import { readHardwareSensors, summarizeHardware } from './lib/sensors';
 import type { HardwareSnapshot, SensorSummary } from './lib/sensors';
-import { openRemoteTool } from './lib/support';
+import { getRemoteToolStatus, openRemoteTool } from './lib/support';
+import type { RemoteToolStatus } from './lib/support';
 import { isTauriRuntime, safeInvoke } from './lib/tauri';
 
 type Mode = 'protected' | 'local';
 type Tone = 'success' | 'warning' | 'error' | 'info';
 type Notice = { tone: Tone; title: string; detail?: string };
-type Panel = 'tools' | 'details' | 'temperature' | null;
+type Panel = 'tools' | 'details' | 'temperature' | 'support' | null;
 type ConfirmAction = { id: string; title: string; detail: string } | null;
 
 const protectedConsent: UpdateConsentInput = {
   assistantEnabled: true,
   shareDiagnostics: true,
-  automaticChecks: true,
+  automaticChecks: false,
   hardwareSensors: true,
   elevatedSensors: false
 };
@@ -88,10 +89,10 @@ function NexoMark({ size = 24 }: { size?: number }) {
 
 function friendlyError(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : fallback;
-  if (/tard[oó] demasiado|timeout|tiempo de espera/i.test(message)) return 'Windows tardó demasiado. Probá nuevamente.';
+  if (/tard[oó] demasiado|timeout|tiempo de espera/i.test(message)) return 'Windows tardó demasiado. La tarea fue detenida; probá nuevamente.';
   if (/permission|denied|rechaz|autorización/i.test(message)) return 'Windows no autorizó esa acción.';
   if (/fetch|network|internet|supabase|rpc/i.test(message)) return 'El servicio conectado no está disponible. Las herramientas locales siguen funcionando.';
-  return fallback;
+  return message || fallback;
 }
 
 function lastCheckLabel(report: DiagnosticReport | null) {
@@ -103,23 +104,26 @@ function lastCheckLabel(report: DiagnosticReport | null) {
 }
 
 function healthState(report: DiagnosticReport | null, summary: SensorSummary | null) {
-  if (!report) return { title: 'Revisemos tu PC', detail: 'Un chequeo tarda menos de un minuto.', tone: 'info' as Tone };
-  const diskRatio = report.systemDriveTotalGb ? report.systemDriveFreeGb / report.systemDriveTotalGb : 1;
-  const ramRatio = report.ramTotalGb ? report.ramFreeGb / report.ramTotalGb : 1;
+  if (!report) return { title: 'Revisión pendiente', detail: 'La app está lista. Revisá el equipo cuando lo necesites.', tone: 'info' as Tone };
+  const diskRatio = report.systemDriveTotalGb > 0 ? report.systemDriveFreeGb / report.systemDriveTotalGb : 1;
+  const ramRatio = report.ramTotalGb > 0 ? report.ramFreeGb / report.ramTotalGb : 1;
   const hot = (summary?.cpuTemperatureC ?? 0) >= 88 || (summary?.gpuTemperatureC ?? 0) >= 88;
   const issues = [diskRatio < .12, ramRatio < .12, report.defenderStatus !== 'Activo', report.pendingReboot, hot].filter(Boolean).length;
-  if (issues) return { title: `${issues} ${issues === 1 ? 'punto para revisar' : 'puntos para revisar'}`, detail: 'NEXO puede ayudarte a resolverlo.', tone: 'warning' as Tone };
-  return { title: 'Tu PC está en orden', detail: 'No encontramos problemas importantes.', tone: 'success' as Tone };
+  if (issues) return { title: `${issues} ${issues === 1 ? 'punto para revisar' : 'puntos para revisar'}`, detail: 'Abrí los detalles para ver qué necesita atención.', tone: 'warning' as Tone };
+  if (!summary?.temperatureAvailable) return { title: 'Sin alertas críticas', detail: 'Rendimiento y seguridad están bien. La temperatura aún no fue verificada.', tone: 'info' as Tone };
+  if (!summary.temperatureTrusted) return { title: 'Sin alertas críticas', detail: 'La lectura térmica es aproximada; no la usamos para declarar el equipo en orden.', tone: 'info' as Tone };
+  return { title: 'Tu PC está en orden', detail: 'No encontramos problemas importantes en esta revisión.', tone: 'success' as Tone };
 }
 
 function temperatureState(snapshot: HardwareSnapshot | null, summary: SensorSummary | null) {
   const values = [summary?.cpuTemperatureC, summary?.gpuTemperatureC, summary?.storageTemperatureC].filter((value): value is number => value != null);
   if (values.length) {
     const hottest = Math.round(Math.max(...values));
+    if (!summary?.temperatureTrusted) return { value: `${hottest}°`, label: 'Aprox.', tone: 'info' as Tone };
     return { value: `${hottest}°`, label: hottest >= 88 ? 'Alta' : 'Normal', tone: hottest >= 88 ? 'warning' as Tone : 'success' as Tone };
   }
-  if (snapshot?.permissionRequired) return { value: 'Permiso', label: 'Tocar para leer', tone: 'warning' as Tone };
-  if (snapshot) return { value: '—', label: 'No expuesta', tone: 'info' as Tone };
+  if (snapshot?.permissionRequired) return { value: 'Permiso', label: 'Requiere Windows', tone: 'warning' as Tone };
+  if (snapshot) return { value: '—', label: 'Sin sensor fiable', tone: 'info' as Tone };
   return { value: '—', label: 'Sin leer', tone: 'info' as Tone };
 }
 
@@ -129,6 +133,8 @@ export default function SupportAppV3() {
   const [dashboard, setDashboard] = useState<ClientDashboard | null>(null);
   const [report, setReport] = useState<DiagnosticReport | null>(null);
   const [hardware, setHardware] = useState<HardwareSnapshot | null>(null);
+  const [remoteTool, setRemoteTool] = useState<RemoteToolStatus | null>(null);
+  const [supportCode, setSupportCode] = useState('');
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState<Notice | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
@@ -139,7 +145,6 @@ export default function SupportAppV3() {
   const [code, setCode] = useState(backendConfig.backendKind === 'local' ? 'DEMO-PAIR' : '');
   const [pendingCode, setPendingCode] = useState('');
   const [modeOpen, setModeOpen] = useState(false);
-  const initialCheckStarted = useRef(false);
 
   const device = dashboard?.device ?? null;
   const consent = dashboard?.consent ?? null;
@@ -149,20 +154,26 @@ export default function SupportAppV3() {
   const temperature = useMemo(() => temperatureState(hardware, summary), [hardware, summary]);
   const ramUsed = report?.ramTotalGb ? Math.round((1 - report.ramFreeGb / report.ramTotalGb) * 100) : null;
   const diskFree = report?.systemDriveFreeGb != null ? Math.round(report.systemDriveFreeGb) : null;
+  const runtimeLabel = appBackend.kind === 'local' ? 'LOCAL' : 'CONECTADO';
 
   useEffect(() => {
     let mounted = true;
     void (async () => {
       try {
-        const restored = await withTimeout(appBackend.bootstrap('client'), 7000, 'NEXO tardó demasiado en abrir.');
+        const [restored, tool] = await Promise.all([
+          withTimeout(appBackend.bootstrap('client'), 7000, 'NEXO tardó demasiado en abrir.'),
+          getRemoteToolStatus().catch(() => null)
+        ]);
         if (!mounted) return;
+        setRemoteTool(tool);
         setSession(restored);
         if (!restored?.deviceToken) return;
         const data = await withTimeout(appBackend.getClientDashboard(restored.deviceToken), 8000, 'NEXO tardó demasiado en cargar esta PC.');
         if (!mounted) return;
         setDashboard(data);
-        const latest = data.diagnostics[0]?.payload as unknown as DiagnosticReport | undefined;
-        if (latest?.generatedAt) setReport(latest);
+        const latestPayload = data.diagnostics[0]?.payload as unknown as (DiagnosticReport & { hardware?: HardwareSnapshot }) | undefined;
+        if (latestPayload?.generatedAt) setReport(latestPayload);
+        if (latestPayload?.hardware?.generatedAt) setHardware(latestPayload.hardware);
       } catch (error) {
         if (mounted) setNotice({ tone: 'error', title: 'No se pudo abrir NEXO', detail: friendlyError(error, 'Cerrá la app y volvé a abrirla.') });
       } finally {
@@ -172,25 +183,36 @@ export default function SupportAppV3() {
     return () => { mounted = false; };
   }, []);
 
-  useEffect(() => {
-    if (!active || report || busy || initialCheckStarted.current) return;
-    initialCheckStarted.current = true;
-    window.setTimeout(() => void inspect(false), 300);
-  }, [active, report, busy]);
-
   async function inspect(showNotice = true) {
     if (!session?.deviceToken || !device || busy) return;
     setBusy('Revisando');
     setNotice(null);
     try {
-      const nextReport = await withTimeout(runQuickDiagnostic(), 16000, 'La revisión tardó demasiado.');
-      const nextHardware = await withTimeout(readHardwareSensors(false), 40000, 'La temperatura tardó demasiado.').catch(() => null);
+      const [diagnosticResult, sensorResult] = await Promise.allSettled([
+        withTimeout(runQuickDiagnostic(), 25000, 'La revisión tardó demasiado.'),
+        withTimeout(readHardwareSensors(false), 50000, 'La temperatura tardó demasiado.')
+      ]);
+      if (diagnosticResult.status === 'rejected') throw diagnosticResult.reason;
+
+      const nextReport = diagnosticResult.value;
+      const nextHardware = sensorResult.status === 'fulfilled' ? sensorResult.value : null;
       setReport(nextReport);
-      setHardware(nextHardware);
+      if (nextHardware) setHardware(nextHardware);
+
       if (consent?.shareDiagnostics) {
         void appBackend.saveDiagnostic({ deviceId: device.id, payload: { ...nextReport, hardware: nextHardware } }, session.deviceToken).catch(() => undefined);
       }
-      if (showNotice) setNotice({ tone: 'success', title: 'Revisión lista', detail: 'Los valores ya están actualizados.' });
+
+      if (showNotice) {
+        const nextSummary = nextHardware ? summarizeHardware(nextHardware) : null;
+        setNotice({
+          tone: nextSummary?.temperatureTrusted ? 'success' : 'info',
+          title: 'Revisión lista',
+          detail: nextSummary?.temperatureTrusted
+            ? 'Rendimiento, seguridad y sensores fueron actualizados.'
+            : 'Rendimiento y seguridad fueron actualizados. La temperatura no tuvo una lectura fiable.'
+        });
+      }
     } catch (error) {
       setNotice({ tone: 'error', title: 'No se pudo revisar', detail: friendlyError(error, 'Probá nuevamente.') });
     } finally {
@@ -202,7 +224,7 @@ export default function SupportAppV3() {
     if (!pendingCode || busy) return;
     setBusy('Activando');
     try {
-      const identity = await withTimeout(runQuickDiagnostic(), 7000, 'Windows tardó demasiado.').catch(() => null);
+      const identity = await withTimeout(runQuickDiagnostic(), 25000, 'Windows tardó demasiado.').catch(() => null);
       const registered = await withTimeout(appBackend.registerClient({
         pairingCode: pendingCode,
         deviceName: identity?.computerName || 'Mi PC',
@@ -219,6 +241,7 @@ export default function SupportAppV3() {
       setDashboard({ ...data, consent: savedConsent });
       setModeOpen(false);
       setPendingCode('');
+      setNotice({ tone: 'success', title: 'PC conectada', detail: 'NEXO está listo. La primera revisión se ejecuta solo cuando la pedís.' });
     } catch (error) {
       setNotice({ tone: 'error', title: 'No se pudo activar', detail: friendlyError(error, 'Revisá el código y probá otra vez.') });
     } finally {
@@ -227,11 +250,11 @@ export default function SupportAppV3() {
   }
 
   async function runSimpleAction(action: string, working: string) {
-    if (busy) return;
+    if (busy) return null;
     setBusy(working);
     setNotice(null);
     try {
-      const result = await withTimeout(runAgentAction(action), 90000, `${working} tardó demasiado.`);
+      const result = await withTimeout(runAgentAction(action), 30000, `${working} tardó demasiado.`);
       setNotice({ tone: result.ok ? 'success' : 'error', title: result.ok ? 'Listo' : 'No se pudo completar', detail: result.message });
       return result;
     } catch (error) {
@@ -248,14 +271,13 @@ export default function SupportAppV3() {
     setBusy(elevated ? 'Esperando permiso' : 'Leyendo sensores');
     setNotice(null);
     try {
-      const snapshot = await withTimeout(readHardwareSensors(elevated), elevated ? 120000 : 45000, 'La lectura tardó demasiado.');
+      const snapshot = await withTimeout(readHardwareSensors(elevated), elevated ? 150000 : 55000, 'La lectura tardó demasiado.');
       setHardware(snapshot);
       const next = summarizeHardware(snapshot);
-      const found = next.cpuTemperatureC != null || next.gpuTemperatureC != null || next.storageTemperatureC != null;
       setNotice({
-        tone: found ? 'success' : snapshot.permissionRequired ? 'warning' : 'info',
-        title: found ? 'Temperatura actualizada' : snapshot.permissionRequired ? 'Falta permiso de Windows' : 'Sensor no disponible',
-        detail: found ? 'CPU, GPU y discos compatibles fueron leídos.' : snapshot.note
+        tone: next.temperatureTrusted ? 'success' : snapshot.permissionRequired ? 'warning' : 'info',
+        title: next.temperatureTrusted ? 'Temperatura actualizada' : snapshot.permissionRequired ? 'Falta permiso de Windows' : 'Sin lectura térmica fiable',
+        detail: next.temperatureTrusted ? 'CPU, GPU o discos compatibles fueron leídos.' : snapshot.note
       });
       setPanel('temperature');
     } catch (error) {
@@ -268,13 +290,37 @@ export default function SupportAppV3() {
   async function requestSupport() {
     if (!session?.deviceToken || !device || busy) return;
     setBusy('Preparando soporte');
+    setNotice(null);
     try {
       const ticket = await appBackend.createTicket({ deviceId: device.id, issue: input.trim() || 'Solicita asistencia técnica', clientName: device.displayName, priority: 'normal' }, session.deviceToken);
       const remote = await appBackend.createRemoteSession({ deviceId: device.id, ticketId: ticket.id }, session.deviceToken);
-      void openRemoteTool().catch(() => undefined);
-      setNotice({ tone: 'success', title: 'Soporte preparado', detail: `Código ${remote.code}` });
+      setSupportCode(remote.code);
+
+      let status = await getRemoteToolStatus();
+      if (status.installed) status = await openRemoteTool();
+      setRemoteTool(status);
+      setPanel('support');
+      setNotice({
+        tone: status.installed ? 'success' : 'warning',
+        title: status.installed ? 'RustDesk abierto' : 'Solicitud creada',
+        detail: status.message
+      });
     } catch (error) {
       setNotice({ tone: 'error', title: 'No se pudo abrir soporte', detail: friendlyError(error, 'Probá nuevamente.') });
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function openRemoteNow() {
+    if (busy) return;
+    setBusy('Abriendo RustDesk');
+    try {
+      const status = await openRemoteTool();
+      setRemoteTool(status);
+      setNotice({ tone: status.installed ? 'success' : 'warning', title: status.installed ? 'RustDesk abierto' : 'RustDesk no está instalado', detail: status.message });
+    } catch (error) {
+      setNotice({ tone: 'error', title: 'No se pudo abrir RustDesk', detail: friendlyError(error, 'Probá nuevamente.') });
     } finally {
       setBusy('');
     }
@@ -331,7 +377,7 @@ export default function SupportAppV3() {
     <main className="nc-app">
       <header className="nc-topbar" data-tauri-drag-region>
         <div className="nc-brand" data-tauri-drag-region><NexoMark size={22} /><span><b>NEXO</b><small>Support</small></span></div>
-        <span className={`nc-live ${health.tone}`} data-tauri-drag-region><i />{busy || (active ? 'ACTIVO' : 'SIN ACTIVAR')}</span>
+        <span className={`nc-live ${health.tone}`} data-tauri-drag-region><i />{busy || (active ? runtimeLabel : 'SIN ACTIVAR')}</span>
         <div className="nc-window-actions">
           <button aria-label="Menú" onClick={() => setMenuOpen((value) => !value)}><Menu size={16} /></button>
           <button aria-label="Minimizar" onClick={() => void safeInvoke('minimize_main_window')}><Minus size={15} /></button>
@@ -348,7 +394,7 @@ export default function SupportAppV3() {
       </header>
 
       {notice && (
-        <div className={`nc-toast ${notice.tone}`}>
+        <div className={`nc-toast ${notice.tone}`} role="status" aria-live="polite">
           {notice.tone === 'error' || notice.tone === 'warning' ? <AlertTriangle size={17} /> : <Check size={17} />}
           <span><b>{notice.title}</b>{notice.detail && <small>{notice.detail}</small>}</span>
           <button aria-label="Cerrar aviso" onClick={() => setNotice(null)}><X size={14} /></button>
@@ -369,25 +415,25 @@ export default function SupportAppV3() {
         <>
           <section className="nc-home">
             <section className={`nc-hero ${health.tone}`}>
-              <div className="nc-hero-state"><span><ShieldCheck size={22} /></span><div><small>{lastCheckLabel(report)}</small><h1>{health.title}</h1><p>{health.detail}</p></div></div>
+              <div className="nc-hero-state"><span><ShieldCheck size={21} /></span><div><small>{lastCheckLabel(report)}</small><h1>{health.title}</h1><p>{health.detail}</p></div></div>
               <button onClick={() => void inspect()} disabled={Boolean(busy)}>{busy === 'Revisando' ? <RefreshCw className="spin" size={16} /> : <Gauge size={16} />} Revisar</button>
             </section>
 
             <section className="nc-readings" aria-label="Estado del equipo">
               <Reading icon={<Thermometer />} label="Temp." value={temperature.value} note={temperature.label} tone={temperature.tone} onClick={() => setPanel('temperature')} />
-              <Reading icon={<MemoryStick />} label="RAM" value={ramUsed != null ? `${ramUsed}%` : '—'} note={ramUsed != null ? (ramUsed > 85 ? 'Alta' : 'Normal') : 'Sin dato'} tone={(ramUsed ?? 0) > 85 ? 'warning' : 'success'} onClick={() => setPanel('details')} />
-              <Reading icon={<HardDrive />} label="Libre" value={diskFree != null ? `${diskFree} GB` : '—'} note={diskFree != null ? (diskFree < 15 ? 'Bajo' : 'Bien') : 'Sin dato'} tone={(diskFree ?? 99) < 15 ? 'warning' : 'success'} onClick={() => setPanel('details')} />
-              <Reading icon={<ShieldCheck />} label="Seguridad" value={report ? (report.defenderStatus === 'Activo' ? 'Bien' : 'Revisar') : '—'} note={report?.defenderStatus || 'Sin dato'} tone={report?.defenderStatus === 'Activo' ? 'success' : 'warning'} onClick={() => void runSimpleAction('defender_status', 'Revisando seguridad')} />
+              <Reading icon={<MemoryStick />} label="RAM" value={ramUsed != null ? `${ramUsed}%` : '—'} note={ramUsed != null ? (ramUsed > 85 ? 'Alta' : 'Normal') : 'Sin dato'} tone={ramUsed == null ? 'info' : ramUsed > 85 ? 'warning' : 'success'} onClick={() => setPanel('details')} />
+              <Reading icon={<HardDrive />} label="Libre" value={diskFree != null ? `${diskFree} GB` : '—'} note={diskFree != null ? (diskFree < 15 ? 'Bajo' : 'Bien') : 'Sin dato'} tone={diskFree == null ? 'info' : diskFree < 15 ? 'warning' : 'success'} onClick={() => setPanel('details')} />
+              <Reading icon={<ShieldCheck />} label="Seguridad" value={report ? (report.defenderStatus === 'Activo' ? 'Bien' : 'Revisar') : '—'} note={report?.defenderStatus || 'Sin dato'} tone={!report ? 'info' : report.defenderStatus === 'Activo' ? 'success' : 'warning'} onClick={() => void runSimpleAction('defender_status', 'Revisando seguridad')} />
             </section>
 
             <section className="nc-actions">
-              <button onClick={() => setPanel('tools')}><Sparkles /><span><b>Optimizar</b><small>Acciones útiles</small></span></button>
+              <button onClick={() => setPanel('tools')}><Sparkles /><span><b>Optimizar</b><small>Acciones seguras</small></span></button>
               <button onClick={() => void runSimpleAction('network_check', 'Revisando Internet')} disabled={Boolean(busy)}><Wifi /><span><b>Internet</b><small>Probar conexión</small></span></button>
-              <button onClick={() => void requestSupport()} disabled={Boolean(busy)}><Headphones /><span><b>Técnico</b><small>Pedir ayuda</small></span></button>
+              <button onClick={() => void requestSupport()} disabled={Boolean(busy)}><Headphones /><span><b>Técnico</b><small>{remoteTool?.installed ? 'RustDesk listo' : 'Pedir ayuda'}</small></span></button>
             </section>
 
             {reply && <section className="nc-reply"><NexoMark size={17} /><p>{reply}</p><button aria-label="Cerrar respuesta" onClick={() => setReply('')}><X size={13} /></button></section>}
-            {busy && <section className="nc-working"><RefreshCw className="spin" size={17} /><b>{busy}</b></section>}
+            {busy && <section className="nc-working" role="status"><RefreshCw className="spin" size={16} /><b>{busy}</b><span>Podés seguir viendo la app.</span></section>}
           </section>
 
           <footer className="nc-footer">
@@ -415,7 +461,7 @@ export default function SupportAppV3() {
       {panel && (
         <div className="nc-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPanel(null); }}>
           <section className="nc-sheet">
-            <header><div><small>{panel === 'tools' ? 'HERRAMIENTAS' : panel === 'temperature' ? 'SENSORES' : 'DETALLES'}</small><h2>{panel === 'tools' ? '¿Qué querés mejorar?' : panel === 'temperature' ? 'Temperatura del equipo' : 'Estado completo'}</h2></div><button aria-label="Cerrar" onClick={() => setPanel(null)}><X size={17} /></button></header>
+            <header><div><small>{panel === 'tools' ? 'HERRAMIENTAS' : panel === 'temperature' ? 'SENSORES' : panel === 'support' ? 'ESCRITORIO REMOTO' : 'DETALLES'}</small><h2>{panel === 'tools' ? '¿Qué querés mejorar?' : panel === 'temperature' ? 'Temperatura del equipo' : panel === 'support' ? 'Soporte remoto' : 'Estado completo'}</h2></div><button aria-label="Cerrar" onClick={() => setPanel(null)}><X size={17} /></button></header>
 
             {panel === 'tools' && (
               <div className="nc-tool-list">
@@ -435,8 +481,21 @@ export default function SupportAppV3() {
                   <Value label="Disco" value={summary?.storageTemperatureC != null ? `${Math.round(summary.storageTemperatureC)} °C` : 'No disponible'} />
                   <Value label="Ventilador" value={summary?.fanRpm != null ? `${Math.round(summary.fanRpm)} RPM` : 'No disponible'} />
                 </div>
+                <div className="nc-source-row"><span>Fuente</span><b>{summary?.sourceLabel || 'Todavía sin lectura'}</b></div>
                 <button className="nc-primary" onClick={() => void readTemperature(Boolean(hardware?.permissionRequired))} disabled={Boolean(busy)}>{hardware?.permissionRequired ? 'Leer con permiso de Windows' : 'Volver a leer'}</button>
-                <p>{hardware?.note || 'NEXO consulta sensores que el firmware y los controladores exponen a Windows.'}</p>
+                <p>{hardware?.note || 'NEXO muestra solo valores térmicos plausibles. Una zona ACPI aproximada nunca se presenta como CPU exacta.'}</p>
+              </div>
+            )}
+
+            {panel === 'support' && (
+              <div className="nc-support-panel">
+                <div className={`nc-remote-state ${remoteTool?.installed ? 'ready' : 'missing'}`}>
+                  <Headphones size={22} />
+                  <div><b>{remoteTool?.installed ? 'RustDesk detectado' : 'RustDesk no está instalado'}</b><p>{remoteTool?.message || 'NEXO comprueba si el cliente open source está instalado en Windows.'}</p></div>
+                </div>
+                {supportCode && <div className="nc-support-code"><span>Código de solicitud</span><strong>{supportCode}</strong><small>Compartilo con el técnico de NEXO.</small></div>}
+                <button className="nc-primary" onClick={() => void openRemoteNow()} disabled={Boolean(busy) || !remoteTool?.installed}>{remoteTool?.installed ? 'Abrir RustDesk' : 'RustDesk no disponible'}</button>
+                <p>La conexión nunca empieza sola: el usuario ve RustDesk, comparte su ID y acepta el acceso.</p>
               </div>
             )}
 

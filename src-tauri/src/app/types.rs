@@ -37,6 +37,15 @@ pub struct RemoteSession {
     pub instructions: String,
 }
 
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteToolStatus {
+    pub installed: bool,
+    pub name: String,
+    pub path: Option<String>,
+    pub message: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentStatus {

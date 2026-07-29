@@ -1,7 +1,15 @@
-use super::types::{AgentActionResult, AgentStatus, RemoteSession};
+use super::types::{AgentActionResult, AgentStatus, RemoteSession, RemoteToolStatus};
 use rand::{distributions::Alphanumeric, Rng};
 #[cfg(target_os = "windows")]
-use std::{path::PathBuf, process::Command};
+use std::{
+    env,
+    os::windows::process::CommandExt,
+    path::{Path, PathBuf},
+    process::Command,
+};
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 fn ok(action: &str, message: &str, details: Vec<String>) -> AgentActionResult {
     AgentActionResult {
@@ -33,14 +41,20 @@ pub fn agent_status() -> Result<AgentStatus, String> {
         mode: "tray-on-demand".to_string(),
         monitoring: false,
         version: env!("CARGO_PKG_VERSION").to_string(),
-        notes: "Las revisiones automáticas se realizan únicamente cuando el usuario las autoriza."
+        notes: "Las revisiones se ejecutan en segundo plano únicamente cuando el usuario las autoriza."
             .to_string(),
     })
 }
 
 #[tauri::command]
-pub fn run_agent_action(action_id: String) -> Result<AgentActionResult, String> {
-    match action_id.as_str() {
+pub async fn run_agent_action(action_id: String) -> Result<AgentActionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || run_agent_action_blocking(&action_id))
+        .await
+        .map_err(|error| format!("La acción se interrumpió: {error}"))?
+}
+
+fn run_agent_action_blocking(action_id: &str) -> Result<AgentActionResult, String> {
+    match action_id {
         "temp_scan" => scan_temp_files(),
         "startup_review" => startup_review(),
         "windows_update" => open_windows_update(),
@@ -59,24 +73,47 @@ pub fn run_agent_action(action_id: String) -> Result<AgentActionResult, String> 
 }
 
 #[tauri::command]
-pub fn open_remote_tool() -> Result<String, String> {
+pub fn remote_tool_status() -> Result<RemoteToolStatus, String> {
     #[cfg(target_os = "windows")]
     {
-        if let Some(path) = find_rustdesk() {
-            Command::new("cmd")
-                .arg("/C")
-                .arg("start")
-                .arg("")
-                .arg(path.as_os_str())
-                .spawn()
-                .map_err(|error| format!("No se pudo abrir la asistencia remota: {error}"))?;
-            return Ok("Asistencia remota abierta. El usuario mantiene el control.".to_string());
-        }
-        Ok("No encontré la herramienta remota instalada. La solicitud quedó creada.".to_string())
+        Ok(status_from_path(find_rustdesk()))
     }
     #[cfg(not(target_os = "windows"))]
     {
-        Ok("La conexión remota está preparada para Windows.".to_string())
+        Ok(RemoteToolStatus {
+            installed: false,
+            name: "RustDesk".to_string(),
+            path: None,
+            message: "El escritorio remoto está disponible en Windows.".to_string(),
+        })
+    }
+}
+
+#[tauri::command]
+pub fn open_remote_tool() -> Result<RemoteToolStatus, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let Some(path) = find_rustdesk() else {
+            return Ok(status_from_path(None));
+        };
+
+        let mut command = Command::new(&path);
+        command.creation_flags(CREATE_NO_WINDOW);
+        command
+            .spawn()
+            .map_err(|error| format!("No se pudo abrir RustDesk: {error}"))?;
+
+        Ok(RemoteToolStatus {
+            installed: true,
+            name: "RustDesk".to_string(),
+            path: Some(path.to_string_lossy().to_string()),
+            message: "RustDesk está abierto. El usuario debe compartir el ID visible y aceptar la conexión."
+                .to_string(),
+        })
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        remote_tool_status()
     }
 }
 
@@ -114,7 +151,7 @@ fn network_check() -> Result<AgentActionResult, String> {
     #[cfg(target_os = "windows")]
     {
         let raw = super::diagnostics::run_powershell(r#"$adapter=Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -First 1 Name,InterfaceDescription,LinkSpeed; $gateway=Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Sort-Object RouteMetric | Select-Object -First 1 -ExpandProperty NextHop; $dns=$false; try{Resolve-DnsName microsoft.com -ErrorAction Stop | Out-Null;$dns=$true}catch{}; $internet=Test-NetConnection 1.1.1.1 -Port 443 -InformationLevel Quiet; [PSCustomObject]@{adapter=$adapter;gateway=$gateway;dns=[bool]$dns;internet=[bool]$internet} | ConvertTo-Json -Compress -Depth 4"#)?;
-        Ok(ok("network_check", "Terminé de revisar la conexión.", vec![raw]))
+        Ok(ok("network_check", "La conexión responde correctamente.", vec![raw]))
     }
     #[cfg(not(target_os = "windows"))]
     { Ok(ok("network_check", "Esta revisión está disponible en Windows.", vec![])) }
@@ -133,8 +170,9 @@ fn repair_network() -> Result<AgentActionResult, String> {
 fn open_windows_update() -> Result<AgentActionResult, String> {
     #[cfg(target_os = "windows")]
     {
-        Command::new("cmd")
-            .args(["/C", "start", "", "ms-settings:windowsupdate"])
+        let mut command = Command::new("explorer.exe");
+        command.arg("ms-settings:windowsupdate").creation_flags(CREATE_NO_WINDOW);
+        command
             .spawn()
             .map_err(|error| format!("No se pudo abrir Windows Update: {error}"))?;
         Ok(ok("windows_update", "Abrí Windows Update para que controles la instalación.", vec![]))
@@ -164,15 +202,61 @@ fn defender_quick_scan() -> Result<AgentActionResult, String> {
 }
 
 #[cfg(target_os = "windows")]
+fn status_from_path(path: Option<PathBuf>) -> RemoteToolStatus {
+    match path {
+        Some(path) => RemoteToolStatus {
+            installed: true,
+            name: "RustDesk".to_string(),
+            path: Some(path.to_string_lossy().to_string()),
+            message: "RustDesk está instalado y listo para una sesión autorizada.".to_string(),
+        },
+        None => RemoteToolStatus {
+            installed: false,
+            name: "RustDesk".to_string(),
+            path: None,
+            message: "RustDesk no está instalado. La solicitud puede crearse, pero no se abrirá el escritorio remoto."
+                .to_string(),
+        },
+    }
+}
+
+#[cfg(target_os = "windows")]
 fn find_rustdesk() -> Option<PathBuf> {
     let mut candidates = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
+
+    if let Ok(exe) = env::current_exe() {
         if let Some(dir) = exe.parent() {
             candidates.push(dir.join("tools").join("rustdesk").join("rustdesk.exe"));
+            candidates.push(dir.join("resources").join("rustdesk").join("rustdesk.exe"));
             candidates.push(dir.join("rustdesk.exe"));
         }
     }
-    candidates.push(PathBuf::from(r"C:\Program Files\RustDesk\RustDesk.exe"));
-    candidates.push(PathBuf::from(r"C:\Program Files (x86)\RustDesk\RustDesk.exe"));
-    candidates.into_iter().find(|path| path.exists())
+
+    for variable in ["LOCALAPPDATA", "APPDATA", "ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(root) = env::var_os(variable) {
+            let root = PathBuf::from(root);
+            candidates.push(root.join("RustDesk").join("rustdesk.exe"));
+            candidates.push(root.join("Programs").join("RustDesk").join("rustdesk.exe"));
+        }
+    }
+
+    if let Some(path) = env::var_os("PATH") {
+        for directory in env::split_paths(&path) {
+            candidates.push(directory.join("rustdesk.exe"));
+        }
+    }
+
+    candidates
+        .into_iter()
+        .find(|path| is_executable_file(path))
+}
+
+#[cfg(target_os = "windows")]
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(|extension| extension.eq_ignore_ascii_case("exe"))
+            .unwrap_or(false)
 }

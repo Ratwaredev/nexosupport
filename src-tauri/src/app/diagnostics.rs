@@ -5,10 +5,14 @@ use super::types::ThermalZoneReading;
 use chrono::Utc;
 #[cfg(target_os = "windows")]
 use std::{
+    os::windows::process::CommandExt,
     process::{Command, Output, Stdio},
     thread,
     time::{Duration, Instant},
 };
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[tauri::command]
 pub async fn run_quick_diagnostic() -> Result<DiagnosticReport, String> {
@@ -106,16 +110,18 @@ fn build_recommendations(report: &DiagnosticReport) -> Vec<String> {
 
 #[cfg(target_os = "windows")]
 pub fn run_powershell(script: &str) -> Result<String, String> {
-    let mut command = Command::new("powershell");
-    command.args([
-        "-NoLogo",
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        script,
-    ]);
+    let mut command = Command::new("powershell.exe");
+    command
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ])
+        .creation_flags(CREATE_NO_WINDOW);
     let output = run_command_with_timeout(command, Duration::from_secs(18), "La herramienta de Windows")?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();

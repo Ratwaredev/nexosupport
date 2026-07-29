@@ -110,19 +110,34 @@ internal static class Program
         foreach (var sensor in hardware.Sensors)
         {
             if (sensor.Value is null || !float.IsFinite(sensor.Value.Value)) continue;
+            var value = sensor.Value.Value;
+            if (!IsPlausible(sensor.SensorType, value)) continue;
+
             result.Add(new HardwareSensor(
                 hardware.HardwareType.ToString(),
                 hardware.Name,
                 sensor.SensorType.ToString(),
                 sensor.Name,
-                Math.Round(sensor.Value.Value, 2),
-                sensor.Min is null ? null : Math.Round(sensor.Min.Value, 2),
-                sensor.Max is null ? null : Math.Round(sensor.Max.Value, 2)));
+                Math.Round(value, 2),
+                sensor.Min is null || !float.IsFinite(sensor.Min.Value) ? null : Math.Round(sensor.Min.Value, 2),
+                sensor.Max is null || !float.IsFinite(sensor.Max.Value) ? null : Math.Round(sensor.Max.Value, 2)));
         }
         foreach (var child in hardware.SubHardware)
         {
             ReadHardware(child, result);
         }
+    }
+
+    private static bool IsPlausible(SensorType type, float value)
+    {
+        return type switch
+        {
+            SensorType.Temperature => value is >= 5 and <= 125,
+            SensorType.Load => value is >= 0 and <= 100,
+            SensorType.Fan => value is >= 0 and <= 100000,
+            SensorType.Clock => value is >= 0 and <= 100000,
+            _ => true
+        };
     }
 
     private static bool IsAdministrator()
