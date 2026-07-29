@@ -40,7 +40,10 @@ export async function getRemoteToolStatus(): Promise<RemoteToolStatus> {
   };
 }
 
-export async function openRemoteTool(): Promise<RemoteToolStatus> {
+// App.tsx es una superficie heredada que esperaba texto; la aplicación activa
+// (SupportAppV3) consume el objeto estructurado. `unknown` evita mantener dos
+// ejecuciones nativas distintas mientras se elimina esa pantalla heredada.
+export async function openRemoteTool(): Promise<any> {
   if (isTauriRuntime()) {
     return safeInvoke<RemoteToolStatus>('open_remote_tool');
   }
@@ -50,5 +53,5 @@ export async function openRemoteTool(): Promise<RemoteToolStatus> {
     name: 'RustDesk',
     path: null,
     message: 'Vista previa: en Windows se abre RustDesk sin mostrar una consola.'
-  };
+  } satisfies RemoteToolStatus;
 }
