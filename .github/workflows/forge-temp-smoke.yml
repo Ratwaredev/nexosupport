@@ -1,0 +1,15 @@
+name: Forge temporary runner check
+
+on:
+  push:
+    branches:
+      - forge-temp-installer-v026
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    steps:
+      - run: Write-Output "Forge Windows runner is available"
