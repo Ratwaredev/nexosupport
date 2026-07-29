@@ -20,6 +20,8 @@
 .app-update-secondary:hover{background:#f5f6f8}
 .app-update-primary{border:0;color:#fff;background:#5a51c7}
 .app-update-primary:hover{background:#4f46b8}
+.app-update-close-app{grid-column:1/-1!important;height:30px!important;border:0!important;display:flex;align-items:center;justify-content:center;gap:6px;color:#a14551;background:transparent}
+.app-update-close-app:hover{color:#863641;background:#fff3f4}
 .app-update-progress{grid-column:1/-1;height:42px;display:grid;grid-template-columns:1fr;align-content:center;gap:8px;color:#626671;font-size:9px;text-align:center}
 .app-update-progress i{height:4px;border-radius:999px;background:#ecebf7;overflow:hidden}
 .app-update-progress i::after{content:"";display:block;width:38%;height:100%;border-radius:999px;background:#5a51c7;animation:update-progress 1.1s ease-in-out infinite}
