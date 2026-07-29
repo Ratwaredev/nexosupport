@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, CircleAlert, Download, RefreshCw, X } from 'lucide-react';
+import { Check, CircleAlert, Download, Power, RefreshCw, X } from 'lucide-react';
 import { isTauriRuntime, safeInvoke } from './lib/tauri';
 
 type AvailableUpdate = {
@@ -15,8 +15,14 @@ type UpdateState =
   | { status: 'installing'; update: AvailableUpdate }
   | { status: 'error'; update?: AvailableUpdate; message: string };
 
-const CHECK_EVERY_MS = 15 * 60 * 1000;
-const SNOOZE_MS = 6 * 60 * 60 * 1000;
+type DismissedUpdate = {
+  version: string;
+  until: number;
+};
+
+const CHECK_EVERY_MS = 60 * 1000;
+const MIN_EVENT_GAP_MS = 10 * 1000;
+const SNOOZE_MS = 15 * 60 * 1000;
 const CURRENT_NOTICE_MS = 2600;
 
 function readableError(error: unknown, fallback: string) {
@@ -31,7 +37,8 @@ export default function AppUpdater() {
   const started = useRef(false);
   const installing = useRef(false);
   const checking = useRef(false);
-  const snoozeUntil = useRef(0);
+  const dismissedUpdate = useRef<DismissedUpdate | null>(null);
+  const lastCheckAt = useRef(0);
   const clearTimer = useRef<number | null>(null);
 
   const clearNoticeLater = useCallback(() => {
@@ -39,9 +46,32 @@ export default function AppUpdater() {
     clearTimer.current = window.setTimeout(() => setState({ status: 'idle' }), CURRENT_NOTICE_MS);
   }, []);
 
-  const dismiss = useCallback(() => {
-    snoozeUntil.current = Date.now() + SNOOZE_MS;
+  const dismiss = useCallback((update?: AvailableUpdate) => {
+    if (update?.version) {
+      dismissedUpdate.current = {
+        version: update.version,
+        until: Date.now() + SNOOZE_MS
+      };
+    }
     setState({ status: 'idle' });
+  }, []);
+
+  const closeNexo = useCallback(async () => {
+    if (!isTauriRuntime()) {
+      window.close();
+      return;
+    }
+
+    try {
+      await Promise.race([
+        safeInvoke('exit_app'),
+        new Promise<never>((_, reject) => {
+          window.setTimeout(() => reject(new Error('exit timeout')), 1200);
+        })
+      ]);
+    } catch {
+      window.close();
+    }
   }, []);
 
   const install = useCallback(async (update: AvailableUpdate) => {
@@ -62,16 +92,25 @@ export default function AppUpdater() {
 
   const check = useCallback(async (manual = false) => {
     if (!isTauriRuntime() || installing.current || checking.current) return;
-    if (!manual && Date.now() < snoozeUntil.current) return;
+
+    const now = Date.now();
+    if (!manual && now - lastCheckAt.current < MIN_EVENT_GAP_MS) return;
 
     checking.current = true;
+    lastCheckAt.current = now;
     if (manual) setState({ status: 'checking', manual: true });
+
     try {
       const update = await safeInvoke<AvailableUpdate | null>('check_app_update');
       if (update) {
+        const dismissed = dismissedUpdate.current;
+        if (!manual && dismissed?.version === update.version && Date.now() < dismissed.until) return;
+        if (dismissed && dismissed.version !== update.version) dismissedUpdate.current = null;
         setState({ status: 'available', update });
         return;
       }
+
+      dismissedUpdate.current = null;
       if (manual) {
         setState({ status: 'current' });
         clearNoticeLater();
@@ -92,17 +131,23 @@ export default function AppUpdater() {
     if (!isTauriRuntime() || started.current) return;
     started.current = true;
 
-    const first = window.setTimeout(() => void check(false), 1600);
+    const first = window.setTimeout(() => void check(false), 1800);
     const interval = window.setInterval(() => void check(false), CHECK_EVERY_MS);
     const onFocus = () => void check(false);
     const onVisibility = () => {
       if (document.visibilityState === 'visible') void check(false);
     };
+    const onOnline = () => void check(false);
+    const onPageShow = () => void check(false);
     const onManual = () => void check(true);
+    const onPassive = () => void check(false);
 
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('pageshow', onPageShow);
     window.addEventListener('nexo:check-update', onManual);
+    window.addEventListener('nexo:check-update-passive', onPassive);
 
     return () => {
       window.clearTimeout(first);
@@ -110,7 +155,10 @@ export default function AppUpdater() {
       if (clearTimer.current) window.clearTimeout(clearTimer.current);
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('nexo:check-update', onManual);
+      window.removeEventListener('nexo:check-update-passive', onPassive);
     };
   }, [check]);
 
@@ -136,7 +184,7 @@ export default function AppUpdater() {
     <div className="app-update-backdrop" role="presentation">
       <section className={`app-update-dialog ${state.status}`} role="dialog" aria-modal="true" aria-labelledby="nexo-update-title">
         {!installingNow && (
-          <button className="app-update-dialog-close" aria-label="Cerrar actualización" onClick={dismiss}>
+          <button className="app-update-dialog-close" aria-label="Cerrar actualización" onClick={() => dismiss(update)}>
             <X size={16} />
           </button>
         )}
@@ -160,13 +208,18 @@ export default function AppUpdater() {
         </div>
 
         <footer>
-          {!installingNow && <button className="app-update-secondary" onClick={dismiss}>Más tarde</button>}
+          {!installingNow && <button className="app-update-secondary" onClick={() => dismiss(update)}>Más tarde</button>}
           {!installingNow && (
             <button
               className="app-update-primary"
               onClick={() => update ? void install(update) : void check(true)}
             >
               {failed ? 'Reintentar' : 'Actualizar ahora'}
+            </button>
+          )}
+          {!installingNow && (
+            <button className="app-update-close-app" onClick={() => void closeNexo()}>
+              <Power size={13} /> Cerrar NEXO
             </button>
           )}
           {installingNow && <div className="app-update-progress"><i /><span>Descargando e instalando…</span></div>}
