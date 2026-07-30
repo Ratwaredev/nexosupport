@@ -13,22 +13,21 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
       - name: Download official Electron runtime
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $url = "https://github.com/electron/electron/releases/download/v43.2.0/electron-v43.2.0-win32-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile electron.zip
           New-Item -ItemType Directory -Force -Path electron-runtime | Out-Null
-          Push-Location electron-runtime
-          npm init -y | Out-Null
-          npm install electron@43.2.0 --no-audit --no-fund
-          Copy-Item -Recurse -Force node_modules/electron/dist dist
-          Pop-Location
+          Expand-Archive -Path electron.zip -DestinationPath electron-runtime -Force
+          if (-not (Test-Path "electron-runtime/electron.exe")) { throw "electron.exe missing from official archive" }
+          $hash = (Get-FileHash "electron-runtime/electron.exe" -Algorithm SHA256).Hash.ToLower()
+          "$hash  electron.exe" | Set-Content "electron-runtime/SHA256SUMS.txt"
       - name: Upload official Electron runtime
         uses: actions/upload-artifact@v4
         with:
           name: forge-electron-runtime-v43.2.0-win-x64
-          path: electron-runtime/dist
+          path: electron-runtime
           if-no-files-found: error
           retention-days: 1
