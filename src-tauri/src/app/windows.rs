@@ -8,9 +8,7 @@ fn dispatch_update_check(window: &WebviewWindow, manual: bool) {
     } else {
         "nexo:check-update-passive"
     };
-    let script = format!(
-        "window.dispatchEvent(new Event({event_name:?}));"
-    );
+    let script = format!("window.dispatchEvent(new Event({event_name:?}));");
     let _ = window.eval(&script);
 }
 
@@ -18,8 +16,9 @@ pub fn reveal_main_window(app: &AppHandle, manual_update_check: bool) -> Result<
     let window = app
         .get_webview_window("main")
         .ok_or("No encontré la ventana principal.")?;
-    position_popup(&window);
+
     window.unminimize().map_err(|error| error.to_string())?;
+    position_popup(&window);
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
     dispatch_update_check(&window, manual_update_check);
@@ -27,8 +26,11 @@ pub fn reveal_main_window(app: &AppHandle, manual_update_check: bool) -> Result<
 }
 
 #[tauri::command]
-pub fn hide_main_window(app: AppHandle) {
-    app.exit(0);
+pub fn hide_main_window(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("No encontré la ventana principal.")?;
+    window.hide().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -87,19 +89,36 @@ pub fn close_admin_window(app: AppHandle) -> Result<(), String> {
 }
 
 pub fn position_popup(window: &WebviewWindow) {
-    let Ok(Some(monitor)) = window.primary_monitor() else {
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten());
+    let Some(monitor) = monitor else {
         return;
     };
     let Ok(size) = window.outer_size() else {
         return;
     };
+
     let monitor_size = monitor.size();
     let origin = monitor.position();
-    let x = origin.x + monitor_size.width as i32 - size.width as i32 - 18;
-    let y = origin.y + 24;
+    let margin = 18;
+    let x = origin.x + monitor_size.width as i32 - size.width as i32 - margin;
+    let y = origin.y + monitor_size.height as i32 - size.height as i32 - margin;
     let _ = window.set_position(PhysicalPosition::new(x.max(origin.x), y.max(origin.y)));
 }
 
 pub fn toggle_popup(app: &AppHandle) {
-    let _ = reveal_main_window(app, false);
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    let visible = window.is_visible().unwrap_or(false);
+    let minimized = window.is_minimized().unwrap_or(false);
+    if visible && !minimized {
+        let _ = window.hide();
+    } else {
+        let _ = reveal_main_window(app, false);
+    }
 }
