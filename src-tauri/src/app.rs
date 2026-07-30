@@ -1,5 +1,7 @@
 mod actions;
 mod diagnostics;
+mod optimizer;
+mod remote;
 mod sensors;
 mod types;
 mod updates;
@@ -79,11 +81,13 @@ pub fn run() {
             windows::close_admin_window,
             diagnostics::run_quick_diagnostic,
             sensors::read_hardware_sensors,
+            optimizer::optimize_temp_files,
             actions::create_remote_session,
             actions::agent_status,
             actions::run_agent_action,
-            actions::remote_tool_status,
-            actions::open_remote_tool,
+            remote::remote_tool_status,
+            remote::install_remote_tool,
+            remote::open_remote_tool,
             updates::check_app_update,
             updates::install_app_update
         ])
