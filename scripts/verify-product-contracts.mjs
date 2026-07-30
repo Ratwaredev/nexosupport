@@ -38,7 +38,7 @@ const [
   readFile('src-tauri/windows/hooks.nsh', 'utf8'),
   readFile('scripts/prepare-rustdesk.ps1', 'utf8'),
   readFile('src-tauri/src/app/diagnostics.rs', 'utf8'),
-  readFile('src-tauri/native-sensors/Nexo.SensorReader/Program.cs', 'utf8'),
+  readFile('tools/Nexo.SensorReader/Program.cs', 'utf8'),
   readFile('src/lib/sensors.ts', 'utf8'),
   readFile('src/lib/tool-evidence.ts', 'utf8'),
   readFile('.github/workflows/publish-release.yml', 'utf8'),
@@ -53,7 +53,6 @@ function forbidMatch(source, pattern, message) {
   if (pattern.test(source)) throw new Error(message);
 }
 
-// Active desktop surface.
 requireMatch(main, /SupportAppV6/, 'SupportAppV6 debe ser la superficie activa.');
 requireMatch(main, /support-v7\.css/, 'La UI simplificada debe cargarse en producción.');
 requireMatch(support, /type View = 'assistant' \| 'tools'/, 'Solo Asistente y Herramientas deben ser superficies principales.');
@@ -67,7 +66,6 @@ requireMatch(support, /data-tauri-drag-region/, 'La barra superior debe mover la
 requireMatch(support, /safeInvoke\('hide_main_window'\)/, 'La X debe ocultar NEXO en la bandeja.');
 forbidMatch(support, /Sin analizar|Detectar y abrir RustDesk|Navegadores protegidos|No se borran cookies|La nave está eliminando|lista blanca/, 'La UI volvió a llenarse de texto explicativo.');
 
-// Popup above taskbar and normal tray behavior.
 requireMatch(windows, /monitor\.work_area\(\)/, 'La posición debe usar el área de trabajo y no tapar la barra de tareas.');
 requireMatch(windows, /work_size\.height[\s\S]*?size\.height/, 'La esquina inferior debe calcularse con el alto útil.');
 requireMatch(windows, /window\.hide\(\)/, 'Cerrar debe ocultar el popup.');
@@ -75,7 +73,6 @@ requireMatch(windows, /window\.minimize\(\)/, 'Minimizar debe usar Windows.');
 requireMatch(app, /WindowEvent::CloseRequested[\s\S]*?prevent_close[\s\S]*?popup\.hide/, 'Alt+F4 debe ocultar el popup.');
 requireMatch(app, /"quit" => app\.exit\(0\)/, 'La bandeja debe ofrecer salida real.');
 
-// Real 0-100 optimizer progress; rocket only during deletion.
 requireMatch(optimizer, /Channel<OptimizerProgress>/, 'El optimizador nativo debe transmitir progreso.');
 requireMatch(optimizer, /percent:\s*u8/, 'El progreso debe tener porcentaje estructurado.');
 requireMatch(optimizer, /send_progress\(&channel, 0/, 'La limpieza debe empezar en 0%.');
@@ -87,12 +84,9 @@ requireMatch(support, /progress\.percent/, 'La UI debe mostrar el porcentaje rea
 requireMatch(supportCss, /\.nv-progress/, 'Falta la barra de progreso del optimizador.');
 requireMatch(optimizer, /checked_sub\(Duration::from_secs\(24 \* 60 \* 60\)\)/, 'Solo deben limpiarse temporales de más de 24 horas.');
 requireMatch(optimizer, /follow_links\(false\)/, 'La limpieza no debe seguir enlaces.');
-for (const safeRoot of ['TEMP', 'WINDIR', 'CrashDumps', 'ProgramData']) {
-  requireMatch(optimizer, new RegExp(safeRoot), `Falta la ubicación segura ${safeRoot}.`);
-}
+for (const safeRoot of ['TEMP', 'WINDIR', 'CrashDumps', 'ProgramData']) requireMatch(optimizer, new RegExp(safeRoot), `Falta ${safeRoot}.`);
 forbidMatch(optimizer, /Chrome|Edge|Firefox|Brave|User Data|Login Data|Web Data|Cookies/, 'La limpieza no puede entrar a perfiles de navegador.');
 
-// RustDesk is bundled, installed and exposed with ID.
 requireMatch(rustdeskScript, /rustdesk-\$Version-x86_64\.exe/, 'El build debe descargar el cliente oficial x86_64.');
 requireMatch(rustdeskScript, /Get-FileHash[\s\S]*SHA256/, 'El binario de RustDesk debe verificarse.');
 requireMatch(tauriConfig, /resources\/rustdesk/, 'RustDesk debe viajar dentro del instalador.');
@@ -102,12 +96,11 @@ requireMatch(hooks, /NSIS_HOOK_POSTINSTALL[\s\S]*?--silent-install/, 'NEXO debe 
 requireMatch(remote, /pub async fn install_remote_tool/, 'Debe existir un reintento desde la app.');
 requireMatch(remote, /--get-id/, 'NEXO debe leer el ID de RustDesk.');
 requireMatch(remoteSupport, /id\?: string \| null/, 'La UI debe recibir el ID remoto.');
-requireMatch(support, /issue: status\.id \? `Soporte remoto · RustDesk \$\{status\.id\}`/, 'La solicitud guardada en Administración debe incluir el ID remoto.');
+requireMatch(support, /issue: status\.id \? `Soporte remoto · RustDesk \$\{status\.id\}`/, 'La solicitud debe incluir el ID remoto.');
 requireMatch(support, /createTicket[\s\S]*?createRemoteSession[\s\S]*?openRemoteTool/, 'Soporte remoto debe guardar la solicitud antes de abrir RustDesk.');
 requireMatch(validateWorkflow, /prepare-rustdesk\.ps1/, 'CI debe construir el paquete con RustDesk.');
 requireMatch(releaseWorkflow, /prepare-rustdesk\.ps1/, 'El release debe construir el paquete con RustDesk.');
 
-// Sensors and native commands stay trustworthy and non-blocking.
 requireMatch(nativeSensors, /value >= 5\.0[\s\S]*?value <= 125\.0/, 'Los sensores deben descartar temperaturas imposibles.');
 requireMatch(sensors, /temperatureTrusted/, 'La UI debe distinguir lecturas térmicas confiables.');
 requireMatch(diagnostics, /CREATE_NO_WINDOW/, 'PowerShell no debe abrir consolas.');
@@ -115,22 +108,17 @@ requireMatch(app, /optimizer::optimize_temp_files/, 'El comando de optimización
 requireMatch(app, /remote::install_remote_tool/, 'El instalador remoto debe estar registrado.');
 requireMatch(evidence, /Memoria[\s\S]*?Disco[\s\S]*?Seguridad/, 'El estado general debe mostrar evidencia concreta.');
 
-// Quiet updater and hot update checks.
 requireMatch(updater, /const CHECK_EVERY_MS = 60 \* 1000/, 'NEXO debe buscar actualizaciones sin reiniciar.');
 requireMatch(updater, /Actualizando NEXO/, 'La actualización debe tener una etapa visual propia.');
 requireMatch(updater, /Math\.round\(progress\)/, 'El actualizador debe mostrar progreso.');
 requireMatch(updaterCss, /\.app-update-stage/, 'Falta la escena visual de actualización.');
 forbidMatch(updater, /release\.notes|Cambios incluidos|Cerrar NEXO/, 'El updater volvió a mostrar texto innecesario.');
 
-// Connected releases may save the friend's device in central Administration.
 requireMatch(releaseWorkflow, /VITE_SUPABASE_URL/, 'El release debe recibir la URL del backend.');
 requireMatch(releaseWorkflow, /VITE_SUPABASE_ANON_KEY/, 'El release debe recibir la clave pública del backend.');
-requireMatch(releaseWorkflow, /VITE_DEFAULT_PAIRING_CODE/, 'El release debe permitir un código de soporte preconfigurado.');
+requireMatch(releaseWorkflow, /VITE_DEFAULT_PAIRING_CODE/, 'El release debe permitir un código preconfigurado.');
+forbidMatch(support, /setTimeout\([^)]*runOverview|setTimeout\([^)]*runTemperature/, 'La app no debe analizar automáticamente.');
 
-// No hidden automatic heavy diagnosis.
-forbidMatch(support, /setTimeout\([^)]*runOverview|setTimeout\([^)]*runTemperature/, 'La app no debe analizar la PC automáticamente.');
-
-// Visual evidence.
 for (const shot of ['support-tools-minimal.png', 'support-optimizer-scan.png', 'support-optimizer-flight.png', 'support-optimizer-done.png', 'support-remote-ready.png', 'support-chat-evidence.png']) {
   requireMatch(smoke, new RegExp(shot.replace('.', '\\.')), `Falta la captura ${shot}.`);
 }
