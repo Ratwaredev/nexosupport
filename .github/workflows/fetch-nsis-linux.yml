@@ -1,9 +1,9 @@
 name: Fetch NSIS Linux compiler
 
 on:
-  push:
+  pull_request:
     branches:
-      - forge-temp-installer-v026
+      - main
 
 permissions:
   contents: read
