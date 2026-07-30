@@ -5,8 +5,10 @@
 
   DetailPrint "Preparando soporte remoto..."
   IfFileExists "$INSTDIR\resources\rustdesk\rustdesk-installer.exe" 0 rustdesk_missing
-  ExecWait '"$INSTDIR\resources\rustdesk\rustdesk-installer.exe" --silent-install' $0
-  DetailPrint "RustDesk terminó con código $0"
+  ; RustDesk puede mantener su proceso vivo después de instalarse. No debemos
+  ; bloquear el instalador de NEXO esperando a que cierre la interfaz remota.
+  Exec '"$INSTDIR\resources\rustdesk\rustdesk-installer.exe" --silent-install'
+  DetailPrint "RustDesk se está preparando en segundo plano."
   Goto rustdesk_done
 
 rustdesk_missing:
