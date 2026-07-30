@@ -8,6 +8,7 @@ const [
   support,
   supportCss,
   supportExtraCss,
+  popupCss,
   main,
   app,
   actions,
@@ -27,6 +28,7 @@ const [
   readFile('src/SupportAppV5.tsx', 'utf8'),
   readFile('src/support-v4.css', 'utf8'),
   readFile('src/support-v5.css', 'utf8'),
+  readFile('src/support-v6.css', 'utf8'),
   readFile('src/main.tsx', 'utf8'),
   readFile('src-tauri/src/app.rs', 'utf8'),
   readFile('src-tauri/src/app/actions.rs', 'utf8'),
@@ -48,16 +50,27 @@ function forbidMatch(source, pattern, message) {
   if (pattern.test(source)) throw new Error(message);
 }
 
-// Exit and updater must never trap the user.
-requireMatch(windows, /pub fn hide_main_window\(app: AppHandle\)[\s\S]*?app\.exit\(0\);/, 'La X debe cerrar el proceso, no ocultarlo.');
-requireMatch(app, /WindowEvent::CloseRequested[\s\S]*?close_app\.exit\(0\);/, 'Cerrar la ventana nativa también debe terminar NEXO.');
-requireMatch(support, /aria-label="Cerrar NEXO"[\s\S]*?safeInvoke\('exit_app'\)/, 'La X visual debe invocar exit_app.');
+// The client behaves like a tray popup: bottom-right, movable, minimizable and hidden on close.
+requireMatch(windows, /pub fn hide_main_window[\s\S]*?window\.hide\(\)/, 'La X debe ocultar la ventana principal sin terminar el agente.');
+requireMatch(app, /WindowEvent::CloseRequested \{ api,[\s\S]*?api\.prevent_close\(\)[\s\S]*?popup\.hide\(\)/, 'Alt+F4 o el cierre nativo deben ocultar NEXO en la bandeja.');
+requireMatch(main, /button\[aria-label="Cerrar NEXO"\][\s\S]*?hide_main_window/, 'La X visual debe ocultar el popup.');
+requireMatch(windows, /monitor_size\.width[\s\S]*?size\.width[\s\S]*?monitor_size\.height[\s\S]*?size\.height/, 'El popup debe calcular la esquina inferior derecha del monitor.');
+requireMatch(windows, /pub fn reveal_main_window[\s\S]*?position_popup\(&window\)/, 'Cada reapertura debe devolver NEXO a su posición inicial.');
+requireMatch(windows, /pub fn toggle_popup[\s\S]*?window\.hide\(\)[\s\S]*?reveal_main_window/, 'El icono de bandeja debe alternar entre ocultar y mostrar el popup.');
+requireMatch(support, /data-tauri-drag-region/, 'La barra superior debe permitir mover la ventana.');
+requireMatch(windows, /pub fn minimize_main_window[\s\S]*?window\.minimize\(\)/, 'La ventana debe poder minimizarse normalmente.');
 requireMatch(windows, /WebviewUrl::App\("admin\.html"\.into\(\)\)[\s\S]*?visible\(true\)/, 'NEXO Control debe crearse visible y enfocarse.');
 requireMatch(updater, /Cerrar NEXO/, 'El diálogo de actualización debe permitir cerrar la aplicación.');
 requireMatch(updater, /safeInvoke\('exit_app'\)/, 'El cierre desde el diálogo de actualización debe terminar el proceso.');
 requireMatch(updaterCss, /\.app-update-close-app/, 'Falta el control visual para cerrar NEXO desde el actualizador.');
-requireMatch(app, /MenuItem::with_id\(app, "quit", "Cerrar NEXO"/, 'La bandeja debe ofrecer una salida de emergencia visible.');
-requireMatch(app, /"quit" => app\.exit\(0\)/, 'Cerrar NEXO desde la bandeja debe terminar el proceso.');
+requireMatch(app, /MenuItem::with_id\(app, "quit", "Salir de NEXO"/, 'La bandeja debe ofrecer una salida real y explícita.');
+requireMatch(app, /"quit" => app\.exit\(0\)/, 'Salir desde la bandeja debe terminar el proceso.');
+
+// The tools surface must remain visible inside the compact popup.
+requireMatch(popupCss, /\.nx-tools[\s\S]*?grid-template-rows:\s*auto minmax\(0, 1fr\) auto/, 'Herramientas debe reservar espacio real para encabezado, lista y pie.');
+requireMatch(popupCss, /\.nx-tools > \*[\s\S]*?height:\s*auto/, 'Los hijos de Herramientas no pueden volver a ocupar 100% cada uno.');
+requireMatch(popupCss, /\.nx-tool-list[\s\S]*?min-height:\s*0[\s\S]*?overflow-y:\s*auto/, 'La lista de herramientas debe ser visible y desplazable.');
+requireMatch(main, /import\('\.\/support-v6\.css'\)/, 'La corrección de layout de Herramientas debe cargarse en producción.');
 
 requireMatch(updater, /const CHECK_EVERY_MS = 60 \* 1000;/, 'NEXO debe consultar actualizaciones mientras permanece abierto.');
 requireMatch(updater, /window\.addEventListener\('online'/, 'NEXO debe volver a consultar actualizaciones al recuperar Internet.');
@@ -139,4 +152,4 @@ requireMatch(smoke, /support-remote-detection\.png/, 'La detección del cliente 
 requireMatch(releaseWorkflow, /node scripts\/verify-product-contracts\.mjs/, 'El release debe verificar los contratos de producto antes de publicarse.');
 requireMatch(releaseWorkflow, /scripts\/smoke-ui\.mjs/, 'El release debe validar la interfaz real antes de publicarse.');
 
-console.log('Product contracts passed: evidence-first agent, cached tool state, explicit analyses, safe rocket optimizer, protected browser data, authorized RustDesk support, reliable sensors and gated releases.');
+console.log('Product contracts passed: visible tools, bottom-right tray popup, evidence-first agent, safe optimizer, protected browser data and authorized RustDesk support.');
