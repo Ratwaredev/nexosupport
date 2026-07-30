@@ -7,10 +7,11 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "prepare:icon": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-icon.ps1",
     "prepare:sensors": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-sensors.ps1",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "npm run prepare:icon && tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "latest",
