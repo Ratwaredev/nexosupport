@@ -20,10 +20,12 @@ pub fn run() {
                 .get_webview_window("main")
                 .expect("main window missing");
             windows::position_popup(&window);
-            let close_app = app.handle().clone();
+
+            let popup = window.clone();
             window.on_window_event(move |event| {
-                if let WindowEvent::CloseRequested { .. } = event {
-                    close_app.exit(0);
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = popup.hide();
                 }
             });
 
@@ -35,7 +37,7 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
-            let quit_item = MenuItem::with_id(app, "quit", "Cerrar NEXO", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Salir de NEXO", true, None::<&str>)?;
             let tray_menu = Menu::with_items(app, &[&open_item, &update_item, &quit_item])?;
 
             TrayIconBuilder::with_id("nexo-support")
