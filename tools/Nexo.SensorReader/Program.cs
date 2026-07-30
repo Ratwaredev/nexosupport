@@ -148,10 +148,10 @@ internal static class Program
     {
         return type switch
         {
-            SensorType.Temperature => value is >= 5 and <= 125,
-            SensorType.Load => value is >= 0 and <= 100,
-            SensorType.Fan => value is >= 0 and <= 100000,
-            SensorType.Clock => value is >= 0 and <= 100000,
+            SensorType.Temperature => value >= 5.0f && value <= 125.0f,
+            SensorType.Load => value >= 0.0f && value <= 100.0f,
+            SensorType.Fan => value >= 0.0f && value <= 100000.0f,
+            SensorType.Clock => value >= 0.0f && value <= 100000.0f,
             _ => true
         };
     }
