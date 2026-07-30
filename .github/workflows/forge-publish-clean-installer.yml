@@ -27,11 +27,12 @@ jobs:
         shell: pwsh
         run: |
           $parts = Get-ChildItem "forge-build/payload/part-*" | Sort-Object Name
-          if ($parts.Count -ne 16) { throw "Expected 16 payload files, found $($parts.Count)" }
+          if ($parts.Count -ne 13) { throw "Expected 13 payload files, found $($parts.Count)" }
           $payload = ($parts | ForEach-Object { Get-Content $_.FullName -Raw }) -join ""
           [IO.File]::WriteAllBytes("forge-runtime.tar.xz", [Convert]::FromBase64String($payload))
           New-Item -ItemType Directory -Force -Path forge-app | Out-Null
           tar -xJf forge-runtime.tar.xz -C forge-app
+          if ($LASTEXITCODE -ne 0) { throw "Could not extract Forge runtime payload" }
           $version = node -p "require('./forge-app/package.json').version"
           if ($version -ne "0.26.0") { throw "Expected Forge Studio 0.26.0, got $version" }
           Set-Content "forge-app/README.md" "# Forge Studio"
@@ -46,6 +47,7 @@ jobs:
         working-directory: forge-app
         shell: pwsh
         run: |
+          npm test
           node --check desktop/main.cjs
           node --check dist/server/index.js
           node --check dist/agent/index.js
@@ -56,26 +58,13 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
-      - name: Generate checksums
-        shell: pwsh
-        run: |
-          Get-ChildItem "forge-app/release/*.exe" | ForEach-Object {
-            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
-            "$hash  $($_.Name)" | Add-Content "forge-app/release/SHA256SUMS.txt"
-          }
-
-      - name: Publish temporary clean build
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "forge-v0.26.0-clean-11" `
-            forge-app/release/*.exe `
-            forge-app/release/*.blockmap `
-            forge-app/release/latest*.yml `
-            forge-app/release/SHA256SUMS.txt `
-            --repo "${{ github.repository }}" `
-            --target "${{ github.event.pull_request.head.sha }}" `
-            --title "Forge Studio v0.26.0 clean Windows build" `
-            --notes "Temporary standard Electron Builder/NSIS build. No custom bootstrap or PowerShell installer." `
-            --prerelease
+      - name: Upload clean Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Forge-Studio-v0.26.0-Windows-clean
+          path: |
+            forge-app/release/*.exe
+            forge-app/release/*.blockmap
+            forge-app/release/latest*.yml
+          if-no-files-found: error
+          retention-days: 7
