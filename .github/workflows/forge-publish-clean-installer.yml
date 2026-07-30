@@ -29,8 +29,18 @@ jobs:
           $parts = Get-ChildItem "forge-build/payload/part-*" | Sort-Object Name
           Write-Host "Payload files: $($parts.Name -join ', ')"
           if ($parts.Count -ne 15) { throw "Expected 15 payload files, found $($parts.Count)" }
-          $payload = ($parts | ForEach-Object { Get-Content $_.FullName -Raw }) -join ""
-          [IO.File]::WriteAllBytes("forge-runtime.tar.xz", [Convert]::FromBase64String($payload))
+
+          $output = [IO.File]::Open("forge-runtime.tar.xz", [IO.FileMode]::Create, [IO.FileAccess]::Write)
+          try {
+            foreach ($part in $parts) {
+              $text = (Get-Content $part.FullName -Raw).Trim()
+              $bytes = [Convert]::FromBase64String($text)
+              $output.Write($bytes, 0, $bytes.Length)
+            }
+          } finally {
+            $output.Dispose()
+          }
+
           New-Item -ItemType Directory -Force -Path forge-app | Out-Null
           tar -xJf forge-runtime.tar.xz -C forge-app
           if ($LASTEXITCODE -ne 0) { throw "Could not extract Forge runtime payload" }
