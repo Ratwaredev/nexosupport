@@ -9,6 +9,10 @@ async function waitForText(page, text, timeout = 20_000) {
   await page.getByText(text, { exact: false }).first().waitFor({ state: 'visible', timeout });
 }
 
+async function waitForIdle(page, timeout = 30_000) {
+  await page.locator('.nc-progress').waitFor({ state: 'hidden', timeout });
+}
+
 async function assertNoBodyOverflow(page, label) {
   const dimensions = await page.evaluate(() => ({
     bodyWidth: document.body.scrollWidth,
@@ -64,16 +68,19 @@ try {
   await waitForText(page, 'Mantenimiento del equipo');
   await assertDesktopDialog(page, 'tools');
   await page.getByRole('button', { name: /Revisar inicio/ }).click();
-  await waitForText(page, 'Acción de prueba completada', 20_000);
+  await waitForIdle(page);
   await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  await waitForText(page, 'Acción de prueba completada', 20_000);
 
   await page.locator('.nc-readings').getByRole('button', { name: /Temperatura/ }).click();
   await waitForText(page, 'Temperatura del equipo');
   await assertDesktopDialog(page, 'temperature');
   await page.getByRole('button', { name: /Volver a buscar sensores/ }).click();
-  await waitForText(page, 'Temperatura actualizada', 20_000);
+  await waitForIdle(page, 60_000);
+  await waitForText(page, 'Vista previa', 20_000);
   await page.screenshot({ path: 'artifacts/ui/support-temperature.png' });
   await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  await waitForText(page, 'Temperatura actualizada', 20_000);
 
   await page.locator('.nc-actions').getByRole('button', { name: /Hablar con un técnico/ }).click();
   await waitForText(page, 'Soporte remoto');
