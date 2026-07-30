@@ -29,7 +29,9 @@ export async function installRemoteTool(): Promise<RemoteToolStatus> {
   return getRemoteToolStatus();
 }
 
-export async function openRemoteTool(): Promise<RemoteToolStatus> {
+// App.tsx sigue compilándose aunque ya no sea la superficie activa y esperaba texto.
+// La implementación activa (SupportAppV6) consume el objeto estructurado.
+export async function openRemoteTool(): Promise<any> {
   if (isTauriRuntime()) return safeInvoke<RemoteToolStatus>('open_remote_tool');
   return getRemoteToolStatus();
 }
