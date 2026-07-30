@@ -31,6 +31,24 @@ async function assertCompactDialog(page, label) {
   }
 }
 
+async function assertToolsVisible(page) {
+  const list = page.locator('.nx-tool-list');
+  const box = await list.boundingBox();
+  if (!box || box.height < 300) {
+    throw new Error(`Tools list is clipped or missing: ${JSON.stringify(box)}`);
+  }
+
+  const expected = ['Estado general', 'Temperatura', 'Internet', 'Seguridad', 'Inicio de Windows', 'Optimizar', 'Soporte remoto'];
+  for (const label of expected) {
+    const button = page.getByRole('button', { name: new RegExp(label) });
+    await button.waitFor({ state: 'attached' });
+  }
+
+  await page.getByRole('button', { name: /Estado general/ }).first().waitFor({ state: 'visible' });
+  await page.getByRole('button', { name: /Optimizar/ }).scrollIntoViewIfNeeded();
+  await page.getByRole('button', { name: /Optimizar/ }).waitFor({ state: 'visible' });
+}
+
 try {
   const context = await browser.newContext({ viewport: { width: 460, height: 680 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
@@ -54,6 +72,10 @@ try {
 
   await page.getByRole('button', { name: 'Herramientas' }).click();
   await waitForText(page, 'Revisar y resolver');
+  await assertToolsVisible(page);
+  await assertNoBodyOverflow(page, 'tools home');
+  await page.screenshot({ path: 'artifacts/ui/support-tools-visible.png' });
+
   await page.getByRole('button', { name: /Optimizar/ }).click();
   await waitForText(page, 'Todavía no hay datos');
   await waitForText(page, 'Analizar basura');
@@ -109,7 +131,7 @@ try {
   await admin.screenshot({ path: 'artifacts/ui/admin-login.png' });
   await assertNoBodyOverflow(admin, 'admin login');
 
-  console.log('NEXO UI smoke passed: evidence-first chat, non-destructive tool inspection, inline safe optimization, rocket feedback, structured security and temperature results, remote client detection and responsive resizing.');
+  console.log('NEXO UI smoke passed: visible tools, evidence-first chat, safe optimizer, structured security and temperature results, remote client detection and responsive resizing.');
   await context.close();
 } finally {
   await browser.close();
