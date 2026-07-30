@@ -20,19 +20,17 @@ async function start() {
   }
 
   await Promise.all([
-    import('./support-v3.css'),
-    import('./support-v3-interaction.css'),
-    import('./support-v3-feedback.css'),
+    import('./support-v4.css'),
     import('./updater.css')
   ]);
-  const [{ default: SupportAppV3 }, { default: AppUpdater }] = await Promise.all([
-    import('./SupportAppV3'),
+  const [{ default: SupportAppV4 }, { default: AppUpdater }] = await Promise.all([
+    import('./SupportAppV4'),
     import('./AppUpdater')
   ]);
   root.render(
     <React.StrictMode>
       <>
-        <SupportAppV3 />
+        <SupportAppV4 />
         <AppUpdater />
       </>
     </React.StrictMode>
