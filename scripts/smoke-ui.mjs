@@ -5,12 +5,8 @@ const baseUrl = process.env.NEXO_PREVIEW_URL || 'http://127.0.0.1:4173';
 const browser = await chromium.launch({ headless: true });
 await mkdir('artifacts/ui', { recursive: true });
 
-async function waitForText(page, text, timeout = 20_000) {
+async function waitForText(page, text, timeout = 25_000) {
   await page.getByText(text, { exact: false }).first().waitFor({ state: 'visible', timeout });
-}
-
-async function settle(page, delay = 650) {
-  await page.waitForTimeout(delay);
 }
 
 async function assertNoBodyOverflow(page, label) {
@@ -26,7 +22,7 @@ async function assertNoBodyOverflow(page, label) {
 }
 
 async function assertCompactDialog(page, label) {
-  const dialog = page.locator('.nc-sheet:visible').first();
+  const dialog = page.locator('.nx-dialog:visible').first();
   const box = await dialog.boundingBox();
   const viewport = page.viewportSize();
   if (!box || !viewport) throw new Error(`${label}: dialog is not visible.`);
@@ -52,47 +48,55 @@ try {
   await assertNoBodyOverflow(page, 'assistant home');
 
   await page.getByRole('button', { name: 'Revisá mi PC' }).click();
-  await waitForText(page, 'Tu PC está en orden', 30_000);
-  await settle(page);
-  await page.screenshot({ path: 'artifacts/ui/support-chat.png' });
+  await waitForText(page, 'Memoria:');
+  await waitForText(page, 'Disco:');
+  await page.screenshot({ path: 'artifacts/ui/support-chat-evidence.png' });
 
   await page.getByRole('button', { name: 'Herramientas' }).click();
-  await waitForText(page, 'Estado general');
-  await waitForText(page, 'Liberar espacio');
-  await assertNoBodyOverflow(page, 'tools view');
-  await settle(page, 250);
-  await page.screenshot({ path: 'artifacts/ui/support-tools.png' });
+  await waitForText(page, 'Revisar y resolver');
+  await page.getByRole('button', { name: /Optimizar/ }).click();
+  await waitForText(page, 'Todavía no hay datos');
+  await waitForText(page, 'Analizar basura');
+  await page.screenshot({ path: 'artifacts/ui/support-optimizer-empty.png' });
 
-  await page.getByRole('button', { name: /Liberar espacio/ }).click();
-  await waitForText(page, 'requiere tu autorización');
-  await settle(page);
-  await page.screenshot({ path: 'artifacts/ui/support-confirm.png' });
-  await page.getByRole('button', { name: 'Cancelar', exact: true }).click();
-  await waitForText(page, 'No hice ningún cambio');
+  await page.getByRole('button', { name: 'Analizar basura' }).click();
+  await waitForText(page, 'Calculando qué se puede limpiar');
+  await waitForText(page, '742.0 MB disponibles', 30_000);
+  await waitForText(page, 'Navegadores protegidos');
+  await page.screenshot({ path: 'artifacts/ui/support-optimizer-ready.png' });
 
-  await page.getByRole('button', { name: 'Herramientas' }).click();
-  await page.getByRole('button', { name: /Temperatura/ }).first().click();
-  await waitForText(page, 'temperatura más alta', 20_000);
-  await settle(page);
-  await page.screenshot({ path: 'artifacts/ui/support-temperature-chat.png' });
+  await page.getByRole('button', { name: 'Optimizar ahora' }).click();
+  await waitForText(page, 'Se borrarán solo temporales');
+  await page.screenshot({ path: 'artifacts/ui/support-optimizer-confirm.png' });
+  await page.getByRole('button', { name: 'Confirmar' }).click();
+  await waitForText(page, 'Limpiando basura segura');
+  await page.screenshot({ path: 'artifacts/ui/support-optimizer-flight.png' });
+  await waitForText(page, '721.0 MB liberados', 30_000);
+  await waitForText(page, 'sesiones, cookies, perfiles y contraseñas de navegadores no se tocaron');
+  await page.screenshot({ path: 'artifacts/ui/support-optimizer-done.png' });
 
-  await page.getByRole('button', { name: 'Herramientas' }).click();
-  await page.getByRole('button', { name: /Pedir un técnico/ }).click();
-  await waitForText(page, 'solicitud quedó creada', 20_000);
-  await settle(page, 900);
-  await page.screenshot({ path: 'artifacts/ui/support-remote-chat.png' });
+  await page.getByRole('button', { name: 'Volver' }).click();
+  await page.getByRole('button', { name: /Seguridad/ }).click();
+  await waitForText(page, 'Todavía no hay datos');
+  await page.getByRole('button', { name: 'Analizar ahora' }).click();
+  await waitForText(page, 'Protección activa');
+  await waitForText(page, 'Tiempo real');
+  await page.screenshot({ path: 'artifacts/ui/support-security-evidence.png' });
 
-  await page.getByRole('button', { name: 'Herramientas' }).click();
-  await page.getByRole('button', { name: /Ver sensores/ }).click();
-  await waitForText(page, 'Temperatura del equipo');
-  await assertCompactDialog(page, 'temperature details');
-  await settle(page, 250);
-  await page.screenshot({ path: 'artifacts/ui/support-temperature-panel.png' });
-  await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  await page.getByRole('button', { name: 'Volver' }).click();
+  await page.getByRole('button', { name: /Temperatura/ }).click();
+  await page.getByRole('button', { name: 'Analizar ahora' }).click();
+  await waitForText(page, '48 °C máximo');
+  await waitForText(page, 'CPU');
+  await page.screenshot({ path: 'artifacts/ui/support-temperature-evidence.png' });
+
+  await page.getByRole('button', { name: 'Volver' }).click();
+  await page.getByRole('button', { name: /Soporte remoto/ }).click();
+  await waitForText(page, 'RustDesk no está instalado');
+  await page.screenshot({ path: 'artifacts/ui/support-remote-detection.png' });
 
   await page.setViewportSize({ width: 560, height: 760 });
   await assertNoBodyOverflow(page, 'resized support window');
-  await settle(page, 250);
   await page.screenshot({ path: 'artifacts/ui/support-resized.png' });
 
   if (pageErrors.length) throw new Error(`Errores de página: ${pageErrors.join(' | ')}`);
@@ -105,7 +109,7 @@ try {
   await admin.screenshot({ path: 'artifacts/ui/admin-login.png' });
   await assertNoBodyOverflow(admin, 'admin login');
 
-  console.log('NEXO UI smoke passed: chatbot-first assistant, separate minimal tools view, inline confirmations, compact dialogs, responsive resizing and admin entry.');
+  console.log('NEXO UI smoke passed: evidence-first chat, non-destructive tool inspection, inline safe optimization, rocket feedback, structured security and temperature results, remote client detection and responsive resizing.');
   await context.close();
 } finally {
   await browser.close();
