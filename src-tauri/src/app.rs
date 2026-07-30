@@ -85,9 +85,9 @@ pub fn run() {
             actions::create_remote_session,
             actions::agent_status,
             actions::run_agent_action,
-            remote::remote_tool_status,
-            remote::install_remote_tool,
-            remote::open_remote_tool,
+            remote::managed_remote_tool_status,
+            remote::managed_install_remote_tool,
+            remote::managed_open_remote_tool,
             updates::check_app_update,
             updates::install_app_update
         ])
