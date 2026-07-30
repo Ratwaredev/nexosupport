@@ -4,9 +4,12 @@ on:
   push:
     branches:
       - forge-temp-installer-v026
+  pull_request:
+    branches:
+      - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   node-runtime:
@@ -28,17 +31,12 @@ jobs:
           test -n "$node_path"
           cp "$node_path" node.exe
           sha256sum node.exe > SHA256SUMS.txt
-      - name: Publish temporary runtime asset
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          tag="forge-node-runtime-v22.22.2"
-          gh release delete "$tag" --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$tag" node-runtime/node.exe node-runtime/SHA256SUMS.txt \
-            --repo "${{ github.repository }}" \
-            --target "$GITHUB_SHA" \
-            --title "Temporary official Node runtime for Forge" \
-            --notes "Official node-win-x64 22.22.2 runtime used to build the Forge portable executable." \
-            --prerelease
+      - name: Upload official runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-node-runtime-v22.22.2
+          path: |
+            node-runtime/node.exe
+            node-runtime/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 1
