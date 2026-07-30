@@ -101,11 +101,12 @@ pub fn position_popup(window: &WebviewWindow) {
         return;
     };
 
-    let monitor_size = monitor.size();
-    let origin = monitor.position();
-    let margin = 18;
-    let x = origin.x + monitor_size.width as i32 - size.width as i32 - margin;
-    let y = origin.y + monitor_size.height as i32 - size.height as i32 - margin;
+    let work_area = monitor.work_area();
+    let origin = work_area.position;
+    let work_size = work_area.size;
+    let margin = 12;
+    let x = origin.x + work_size.width as i32 - size.width as i32 - margin;
+    let y = origin.y + work_size.height as i32 - size.height as i32 - margin;
     let _ = window.set_position(PhysicalPosition::new(x.max(origin.x), y.max(origin.y)));
 }
 

@@ -15,6 +15,16 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+  VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+  VITE_DEFAULT_PAIRING_CODE: ${{ secrets.VITE_DEFAULT_PAIRING_CODE }}
+  VITE_DEFAULT_ORG_NAME: ${{ secrets.VITE_DEFAULT_ORG_NAME }}
+  VITE_REMOTE_TOOL_URL: ${{ secrets.VITE_REMOTE_TOOL_URL }}
+  VITE_LOCAL_ADMIN_EMAIL: ${{ secrets.VITE_LOCAL_ADMIN_EMAIL }}
+  VITE_LOCAL_ADMIN_PASSWORD: ${{ secrets.VITE_LOCAL_ADMIN_PASSWORD }}
+  VITE_LOCAL_ADMIN_ORG: ${{ secrets.VITE_LOCAL_ADMIN_ORG }}
+
 jobs:
   publish:
     runs-on: windows-latest
@@ -43,6 +53,8 @@ jobs:
           $version = "0.4.${{ github.run_number }}"
           node scripts/set-release-version.mjs $version
           "NEXO_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $connected = -not [string]::IsNullOrWhiteSpace($env:VITE_SUPABASE_URL) -and -not [string]::IsNullOrWhiteSpace($env:VITE_SUPABASE_ANON_KEY)
+          "NEXO_RUNTIME_MODE=$(if ($connected) { 'connected' } else { 'local' })" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Install dependencies
         run: npm ci
@@ -51,14 +63,20 @@ jobs:
         shell: pwsh
         run: ./scripts/prepare-sensors.ps1
 
-      - name: Verify native sensor reader
+      - name: Prepare verified RustDesk client
+        shell: pwsh
+        run: ./scripts/prepare-rustdesk.ps1
+
+      - name: Verify native resources
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $root = Join-Path $PWD 'src-tauri\resources\sensor-helper'
-          $reader = Join-Path $root 'Nexo.SensorReader.exe'
+          $sensorRoot = Join-Path $PWD 'src-tauri\resources\sensor-helper'
+          $reader = Join-Path $sensorRoot 'Nexo.SensorReader.exe'
+          $rustdesk = Join-Path $PWD 'src-tauri\resources\rustdesk\rustdesk-installer.exe'
           if (-not (Test-Path $reader)) { throw 'Missing Nexo.SensorReader.exe before release.' }
-          if (-not (Test-Path (Join-Path $root 'LibreHardwareMonitorLib.dll'))) { throw 'Missing LibreHardwareMonitorLib.dll before release.' }
+          if (-not (Test-Path (Join-Path $sensorRoot 'LibreHardwareMonitorLib.dll'))) { throw 'Missing LibreHardwareMonitorLib.dll before release.' }
+          if (-not (Test-Path $rustdesk) -or (Get-Item $rustdesk).Length -lt 5MB) { throw 'RustDesk installer is missing or incomplete.' }
           $probePath = Join-Path $env:RUNNER_TEMP 'sensor-release-probe.json'
           $process = Start-Process -FilePath $reader -ArgumentList @('--output', $probePath) -Wait -PassThru -NoNewWindow
           if ($process.ExitCode -ne 0) { throw "Sensor reader exited with code $($process.ExitCode)." }
@@ -114,9 +132,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
-            throw 'Missing TAURI_SIGNING_PRIVATE_KEY.'
-          }
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) { throw 'Missing TAURI_SIGNING_PRIVATE_KEY.' }
 
       - name: Build and publish GitHub Release
         id: publish_release
@@ -125,25 +141,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          VITE_DEFAULT_ORG_NAME: ${{ secrets.VITE_DEFAULT_ORG_NAME }}
-          VITE_REMOTE_TOOL_URL: ${{ secrets.VITE_REMOTE_TOOL_URL }}
-          VITE_LOCAL_ADMIN_EMAIL: ${{ secrets.VITE_LOCAL_ADMIN_EMAIL }}
-          VITE_LOCAL_ADMIN_PASSWORD: ${{ secrets.VITE_LOCAL_ADMIN_PASSWORD }}
-          VITE_LOCAL_ADMIN_ORG: ${{ secrets.VITE_LOCAL_ADMIN_ORG }}
         with:
           tagName: v__VERSION__
           releaseName: NEXO Support v__VERSION__
           releaseBody: |
-            NEXO ahora funciona como un agente técnico con evidencia visible.
+            Actualización de soporte de escritorio.
 
-            - Cada herramienta abre su propio estado y no ejecuta análisis al tocarla.
-            - Los datos recientes se reutilizan; el usuario decide cuándo volver a analizar.
-            - El chat muestra RAM, disco, red, seguridad, inicio y temperatura con valores concretos.
-            - Optimización segura con análisis previo, confirmación y animación de nave espacial.
-            - La limpieza usa una lista blanca de temporales antiguos y no toca cookies, sesiones, perfiles, historial ni contraseñas de navegadores.
-            - RustDesk se detecta y abre únicamente con una acción visible; la conexión siempre requiere aceptación del usuario.
-            - Diagnósticos y mantenimiento se ejecutan fuera del hilo de interfaz y sin ventanas de consola.
-            - El release se bloquea si fallan el build, Rust, los contratos o las pruebas visuales.
+            - Ventana ubicada sobre la barra de tareas y restaurada abajo a la derecha.
+            - Herramientas simples, sin textos repetidos ni estados decorativos.
+            - Optimización con progreso real de 0 a 100 y una sola nave durante la limpieza.
+            - RustDesk incluido e instalado junto con NEXO para dejar el soporte remoto listo.
+            - ID remoto asociado a la solicitud visible en Administración cuando el backend está conectado.
+            - Nuevo icono transparente y actualizador visual más limpio.
           releaseDraft: false
           prerelease: false
           updaterJsonPreferNsis: true
@@ -176,25 +185,17 @@ jobs:
               try {
                 $response = Invoke-WebRequest -Uri $manifestUrl -UseBasicParsing -MaximumRedirection 10 -TimeoutSec 30
                 if ($response.StatusCode -eq 200) {
-                  $raw = if ($response.Content -is [byte[]]) {
-                    [System.Text.Encoding]::UTF8.GetString($response.Content)
-                  } else {
-                    [string]$response.Content
-                  }
+                  $raw = if ($response.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
                   $manifest = $raw | ConvertFrom-Json
                   break
                 }
-              } catch {
-                if ($attempt -eq 18) { throw }
-              }
+              } catch { if ($attempt -eq 18) { throw } }
               Start-Sleep -Seconds 5
             }
             if ($null -eq $manifest) { throw 'latest.json was not published.' }
             $probe.version = $manifest.version
             $probe.manifest = $manifest
-            if ($manifest.version -ne $env:NEXO_VERSION) {
-              throw "latest.json version $($manifest.version) does not match $env:NEXO_VERSION."
-            }
+            if ($manifest.version -ne $env:NEXO_VERSION) { throw "latest.json version $($manifest.version) does not match $env:NEXO_VERSION." }
             $windows = @($manifest.platforms.PSObject.Properties | Where-Object { $_.Name -match '^windows-x86_64' })
             if ($windows.Count -eq 0) { throw 'latest.json has no Windows x86_64 updater entry.' }
             $entry = $windows | Where-Object { $_.Name -match 'nsis' } | Select-Object -First 1
@@ -205,9 +206,9 @@ jobs:
             if ([string]::IsNullOrWhiteSpace($entry.Value.url)) { throw 'Windows updater URL is empty.' }
             if ([string]::IsNullOrWhiteSpace($entry.Value.signature)) { throw 'Windows updater signature is empty.' }
             $assetPath = Join-Path $env:RUNNER_TEMP 'nexo-updater-asset.bin'
-            Invoke-WebRequest -Uri $entry.Value.url -OutFile $assetPath -UseBasicParsing -MaximumRedirection 10 -TimeoutSec 120
+            Invoke-WebRequest -Uri $entry.Value.url -OutFile $assetPath -UseBasicParsing -MaximumRedirection 10 -TimeoutSec 180
             $probe.assetBytes = (Get-Item $assetPath).Length
-            if ($probe.assetBytes -lt 100000) { throw "Windows updater asset is unexpectedly small: $($probe.assetBytes) bytes." }
+            if ($probe.assetBytes -lt 5000000) { throw "Windows updater asset is unexpectedly small: $($probe.assetBytes) bytes." }
             $probe.ok = $true
             "UPDATER_PLATFORM=$($entry.Name)" | Out-File -FilePath $env:GITHUB_ENV -Append
           } catch {
@@ -226,6 +227,7 @@ jobs:
           RELEASE_VERSION: ${{ env.NEXO_VERSION }}
           RELEASE_URL: ${{ steps.publish_release.outputs.releaseHtmlUrl }}
           UPDATER_PLATFORM: ${{ env.UPDATER_PLATFORM }}
+          RUNTIME_MODE: ${{ env.NEXO_RUNTIME_MODE }}
         with:
           script: |
             const fs = require('fs');
@@ -241,9 +243,7 @@ jobs:
               if (error.status !== 404) throw error;
             }
             let updaterProbe = null;
-            if (fs.existsSync('updater-probe.json')) {
-              updaterProbe = JSON.parse(fs.readFileSync('updater-probe.json', 'utf8').replace(/^\uFEFF/, ''));
-            }
+            if (fs.existsSync('updater-probe.json')) updaterProbe = JSON.parse(fs.readFileSync('updater-probe.json', 'utf8').replace(/^\uFEFF/, ''));
             const payload = {
               version: process.env.RELEASE_VERSION || null,
               status: process.env.RELEASE_STATUS,
@@ -252,7 +252,7 @@ jobs:
               releaseUrl: process.env.RELEASE_URL || null,
               updaterPlatform: process.env.UPDATER_PLATFORM || null,
               updaterProbe,
-              runtimeMode: 'local',
+              runtimeMode: process.env.RUNTIME_MODE || 'local',
               recordedAt: new Date().toISOString()
             };
             await github.rest.repos.createOrUpdateFileContents({
