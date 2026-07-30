@@ -21,20 +21,30 @@ jobs:
         with:
           dotnet-version: 8.0.x
       - uses: dtolnay/rust-toolchain@stable
+
       - name: Install dependencies
         run: npm ci
+
       - name: Build native sensor reader
         shell: pwsh
         run: ./scripts/prepare-sensors.ps1
-      - name: Verify and execute sensor reader before packaging
+
+      - name: Prepare verified RustDesk client
+        shell: pwsh
+        run: ./scripts/prepare-rustdesk.ps1
+
+      - name: Verify native resources before packaging
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $root = Join-Path $PWD 'src-tauri\resources\sensor-helper'
           $reader = Join-Path $root 'Nexo.SensorReader.exe'
           $library = Join-Path $root 'LibreHardwareMonitorLib.dll'
+          $rustdesk = Join-Path $PWD 'src-tauri\resources\rustdesk\rustdesk-installer.exe'
           if (-not (Test-Path $reader)) { throw 'Missing Nexo.SensorReader.exe before build.' }
           if (-not (Test-Path $library)) { throw 'Missing LibreHardwareMonitorLib.dll before build.' }
+          if (-not (Test-Path $rustdesk)) { throw 'Missing RustDesk installer before build.' }
+          if ((Get-Item $rustdesk).Length -lt 5MB) { throw 'RustDesk installer is incomplete.' }
           $files = @(Get-ChildItem $root -File)
           $bytes = ($files | Measure-Object Length -Sum).Sum
           if ($files.Count -lt 10 -or $bytes -lt 10000000) { throw "Sensor helper is incomplete: $($files.Count) files, $bytes bytes." }
@@ -45,15 +55,17 @@ jobs:
           if ($probe.source -ne 'native-helper') { throw "Unexpected sensor source: $($probe.source)" }
           if ($null -eq $probe.sensors) { throw 'Sensor reader did not return a sensors array.' }
           $invalidTemperatures = @($probe.sensors | Where-Object { $_.sensorType -eq 'Temperature' -and ($_.value -lt 5 -or $_.value -gt 125) })
-          if ($invalidTemperatures.Count -gt 0) { throw "Sensor reader returned impossible temperatures: $($invalidTemperatures | ConvertTo-Json -Compress)" }
-          Write-Host "Sensor reader executed successfully with $(@($probe.sensors).Count) valid readings."
+          if ($invalidTemperatures.Count -gt 0) { throw 'Sensor reader returned an impossible temperature.' }
+
       - name: Validate frontend
         shell: pwsh
         run: |
           npm run build *>&1 | Tee-Object -FilePath frontend.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Verify product contracts
         run: node scripts/verify-product-contracts.mjs
+
       - name: Upload frontend diagnostic
         if: failure()
         uses: actions/upload-artifact@v4
@@ -61,11 +73,13 @@ jobs:
           name: nexo-frontend-log
           path: frontend.log
           if-no-files-found: ignore
+
       - name: Install browser for click smoke
         run: |
           npm install --no-save playwright
           npx playwright install chromium
-      - name: Exercise compact popup, remote flow and admin entry
+
+      - name: Exercise desktop support UI
         shell: pwsh
         run: |
           $preview = Start-Process npm.cmd -ArgumentList @('run','preview','--','--host','127.0.0.1','--port','4173') -PassThru
@@ -84,6 +98,7 @@ jobs:
           } finally {
             Stop-Process -Id $preview.Id -Force -ErrorAction SilentlyContinue
           }
+
       - name: Upload UI evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -91,6 +106,7 @@ jobs:
           name: nexo-ui-evidence
           path: artifacts/ui/*.png
           if-no-files-found: warn
+
       - name: Upload UI smoke diagnostic
         if: failure()
         uses: actions/upload-artifact@v4
@@ -98,11 +114,13 @@ jobs:
           name: nexo-ui-smoke-log
           path: ui-smoke.log
           if-no-files-found: ignore
+
       - name: Validate Tauri backend
         shell: pwsh
         run: |
           cargo check --manifest-path src-tauri/Cargo.toml *>&1 | Tee-Object -FilePath cargo.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Upload Rust diagnostic
         if: failure()
         uses: actions/upload-artifact@v4
@@ -110,9 +128,11 @@ jobs:
           name: nexo-rust-log
           path: cargo.log
           if-no-files-found: ignore
+
       - name: Build unsigned Windows installer
         run: npm run tauri:build -- --config src-tauri/tauri.ci.conf.json
-      - name: Install bundle and execute packaged sensor reader
+
+      - name: Install bundle and verify packaged dependencies
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -132,12 +152,13 @@ jobs:
           ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
 
           $reader = $null
-          for ($attempt = 1; $attempt -le 20 -and -not $reader; $attempt++) {
+          $bundledRustDesk = $null
+          for ($attempt = 1; $attempt -le 30 -and (-not $reader -or -not $bundledRustDesk); $attempt++) {
             foreach ($root in $candidateRoots) {
-              $reader = Get-ChildItem $root -Recurse -Filter 'Nexo.SensorReader.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1
-              if ($reader) { break }
+              if (-not $reader) { $reader = Get-ChildItem $root -Recurse -Filter 'Nexo.SensorReader.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1 }
+              if (-not $bundledRustDesk) { $bundledRustDesk = Get-ChildItem $root -Recurse -Filter 'rustdesk-installer.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1 }
             }
-            if (-not $reader) { Start-Sleep -Seconds 1 }
+            if (-not $reader -or -not $bundledRustDesk) { Start-Sleep -Seconds 1 }
           }
 
           $tree = foreach ($root in $candidateRoots) {
@@ -145,21 +166,30 @@ jobs:
             Get-ChildItem $root -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
           }
           $tree | Set-Content -Path installed-package-tree.log -Encoding utf8
-          $tree | Select-Object -First 250 | ForEach-Object { Write-Host $_ }
-
           if (-not $reader) { throw 'Installed app does not contain Nexo.SensorReader.exe.' }
-          $readerDirectory = $reader.Directory.FullName
-          if (-not (Test-Path (Join-Path $readerDirectory 'LibreHardwareMonitorLib.dll'))) { throw "Installed helper is missing LibreHardwareMonitorLib.dll: $readerDirectory" }
+          if (-not $bundledRustDesk) { throw 'Installed app does not contain the RustDesk installer.' }
+          if (-not (Test-Path (Join-Path $reader.Directory.FullName 'LibreHardwareMonitorLib.dll'))) { throw 'Installed sensor helper is incomplete.' }
+
           $probePath = Join-Path $env:RUNNER_TEMP 'sensor-installed-probe.json'
           $readerProcess = Start-Process -FilePath $reader.FullName -ArgumentList @('--output', $probePath) -Wait -PassThru -NoNewWindow
           if ($readerProcess.ExitCode -ne 0) { throw "Installed sensor reader exited with code $($readerProcess.ExitCode)." }
           $probe = Get-Content $probePath -Raw | ConvertFrom-Json
           if ($probe.source -ne 'native-helper') { throw "Installed helper returned unexpected source: $($probe.source)" }
-          Write-Host "Installed sensor reader verified at $readerDirectory with $(@($probe.sensors).Count) readings."
 
-          foreach ($root in $candidateRoots) {
-            Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+          $rustdeskExe = $null
+          for ($attempt = 1; $attempt -le 60 -and -not $rustdeskExe; $attempt++) {
+            $rustdeskExe = @(
+              (Join-Path $env:ProgramFiles 'RustDesk\rustdesk.exe'),
+              (Join-Path ${env:ProgramFiles(x86)} 'RustDesk\rustdesk.exe'),
+              (Join-Path $env:LOCALAPPDATA 'Programs\RustDesk\rustdesk.exe')
+            ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+            if (-not $rustdeskExe) { Start-Sleep -Seconds 1 }
           }
+          if (-not $rustdeskExe) { throw 'NEXO installer did not prepare RustDesk.' }
+          Write-Host "RustDesk verified at $rustdeskExe"
+
+          foreach ($root in $candidateRoots) { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
+
       - name: Upload installed package diagnostic
         if: always()
         uses: actions/upload-artifact@v4
@@ -167,6 +197,7 @@ jobs:
           name: nexo-installed-package-tree
           path: installed-package-tree.log
           if-no-files-found: ignore
+
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
