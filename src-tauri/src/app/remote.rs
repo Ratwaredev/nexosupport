@@ -136,7 +136,7 @@ fn powershell_quote(value: &str) -> String {
 }
 
 #[tauri::command]
-pub fn remote_tool_status() -> Result<RemoteClientStatus, String> {
+pub fn managed_remote_tool_status() -> Result<RemoteClientStatus, String> {
     #[cfg(target_os = "windows")]
     {
         Ok(status())
@@ -148,7 +148,7 @@ pub fn remote_tool_status() -> Result<RemoteClientStatus, String> {
 }
 
 #[tauri::command]
-pub async fn install_remote_tool(app: AppHandle) -> Result<RemoteClientStatus, String> {
+pub async fn managed_install_remote_tool(app: AppHandle) -> Result<RemoteClientStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
         #[cfg(target_os = "windows")]
         {
@@ -202,7 +202,7 @@ pub async fn install_remote_tool(app: AppHandle) -> Result<RemoteClientStatus, S
 }
 
 #[tauri::command]
-pub fn open_remote_tool() -> Result<RemoteClientStatus, String> {
+pub fn managed_open_remote_tool() -> Result<RemoteClientStatus, String> {
     #[cfg(target_os = "windows")]
     {
         let current = status();
