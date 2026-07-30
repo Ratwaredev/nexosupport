@@ -1,0 +1,85 @@
+.nx-tools {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The previous rule gave every direct child 100% height, so the header pushed
+   the actual tools below the clipped window. Keep the header and footer natural
+   and reserve the remaining space for the working tool list. */
+.nx-tools > * {
+  height: auto;
+}
+
+.nx-tools > .nx-detail {
+  grid-row: 1 / -1;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.nx-tools-head {
+  padding: 16px 15px 10px;
+  background: #f7f7f9;
+}
+
+.nx-tools-head h1 {
+  margin-top: 3px;
+  font-size: 19px;
+}
+
+.nx-tools-head p {
+  max-width: 360px;
+}
+
+.nx-tool-list {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: 0 12px 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  align-content: start;
+  scrollbar-width: thin;
+  scrollbar-color: #d1d4db transparent;
+}
+
+.nx-tool-list::-webkit-scrollbar {
+  width: 7px;
+}
+
+.nx-tool-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #d1d4db;
+  background-clip: padding-box;
+}
+
+.nx-tool-list > button {
+  flex-shrink: 0;
+}
+
+.nx-tools-note {
+  height: 46px;
+}
+
+@media (min-width: 540px) {
+  .nx-tool-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nx-tool-list > button {
+    min-height: 78px;
+    grid-template-columns: 38px minmax(0, 1fr) 16px;
+    grid-template-areas:
+      "icon copy arrow"
+      "icon status arrow";
+    align-content: center;
+  }
+
+  .nx-tool-list > button > span { grid-area: icon; }
+  .nx-tool-list > button > div { grid-area: copy; }
+  .nx-tool-list > button > em { grid-area: status; justify-self: start; }
+  .nx-tool-list > button > svg { grid-area: arrow; }
+}
