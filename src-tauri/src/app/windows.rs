@@ -1,5 +1,5 @@
 use tauri::{
-    AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
 fn dispatch_update_check(window: &WebviewWindow, manual: bool) {
@@ -18,6 +18,7 @@ pub fn reveal_main_window(app: &AppHandle, manual_update_check: bool) -> Result<
     let window = app
         .get_webview_window("main")
         .ok_or("No encontré la ventana principal.")?;
+    position_popup(&window);
     window.unminimize().map_err(|error| error.to_string())?;
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
@@ -86,12 +87,19 @@ pub fn close_admin_window(app: AppHandle) -> Result<(), String> {
 }
 
 pub fn position_popup(window: &WebviewWindow) {
-    // Kept as a compatibility hook for startup, but NEXO now behaves like a normal
-    // desktop application and opens centered instead of being pinned to a corner.
-    let _ = window.center();
+    let Ok(Some(monitor)) = window.primary_monitor() else {
+        return;
+    };
+    let Ok(size) = window.outer_size() else {
+        return;
+    };
+    let monitor_size = monitor.size();
+    let origin = monitor.position();
+    let x = origin.x + monitor_size.width as i32 - size.width as i32 - 18;
+    let y = origin.y + 24;
+    let _ = window.set_position(PhysicalPosition::new(x.max(origin.x), y.max(origin.y)));
 }
 
 pub fn toggle_popup(app: &AppHandle) {
-    // Clicking the tray icon should reveal/focus the app, never unexpectedly hide it.
     let _ = reveal_main_window(app, false);
 }
