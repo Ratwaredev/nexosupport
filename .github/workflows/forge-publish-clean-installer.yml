@@ -23,23 +23,25 @@ jobs:
         with:
           node-version: 22
 
-      - name: Reconstruct Forge Studio runtime
+      - name: Diagnose and reconstruct Forge Studio runtime
         shell: pwsh
         run: |
           $parts = Get-ChildItem "forge-build/payload/part-*" | Sort-Object Name
           Write-Host "Payload files: $($parts.Name -join ', ')"
           if ($parts.Count -ne 15) { throw "Expected 15 payload files, found $($parts.Count)" }
 
-          $output = [IO.File]::Open("forge-runtime.tar.xz", [IO.FileMode]::Create, [IO.FileAccess]::Write)
-          try {
-            foreach ($part in $parts) {
-              $text = (Get-Content $part.FullName -Raw).Trim()
-              $bytes = [Convert]::FromBase64String($text)
-              $output.Write($bytes, 0, $bytes.Length)
-            }
-          } finally {
-            $output.Dispose()
+          $allText = New-Object System.Text.StringBuilder
+          foreach ($part in $parts) {
+            $raw = Get-Content $part.FullName -Raw
+            $clean = [regex]::Replace($raw, '[^A-Za-z0-9+/=]', '')
+            $invalid = $raw.Length - $clean.Length
+            Write-Host "$($part.Name): raw=$($raw.Length) clean=$($clean.Length) mod4=$($clean.Length % 4) invalid=$invalid first=$($clean.Substring(0,[Math]::Min(8,$clean.Length))) last=$($clean.Substring([Math]::Max(0,$clean.Length-8)))"
+            [void]$allText.Append($clean)
           }
+
+          $payload = $allText.ToString()
+          Write-Host "Combined base64 length: $($payload.Length), mod4=$($payload.Length % 4)"
+          [IO.File]::WriteAllBytes("forge-runtime.tar.xz", [Convert]::FromBase64String($payload))
 
           New-Item -ItemType Directory -Force -Path forge-app | Out-Null
           tar -xJf forge-runtime.tar.xz -C forge-app
