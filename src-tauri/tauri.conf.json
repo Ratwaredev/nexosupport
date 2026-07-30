@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:5173",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run prepare:icon && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -51,7 +51,7 @@
       "endpoints": [
         "https://github.com/Ratwaredev/underdocksoporteapp/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhFNDMzOTk0RkFBQjc0QkEKUldTNmRLdjZsRGxEam5BUmZtSTdMZ3RyeXFPRmcvSHUrWWpTZVNQY0c4NVBCK3o3eCt4MlBPVWEK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaW5uIHB1YmxpYyBrZXk6IDhFNDMzOTk0RkFBQjc0QkEKUldTNmRLdjZsRGxEam5BUmZtSTdMZ3RyeXFPRmcvSHUrWWpTZVNQY0c4NVBCK3o3eCt4MlBPVWEK",
       "windows": { "installMode": "passive" }
     }
   }
