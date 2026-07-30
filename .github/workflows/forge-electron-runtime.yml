@@ -1,0 +1,34 @@
+name: Fetch official Electron runtime for Forge
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  electron-runtime:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download official Electron runtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path electron-runtime | Out-Null
+          Push-Location electron-runtime
+          npm init -y | Out-Null
+          npm install electron@43.2.0 --no-audit --no-fund
+          Copy-Item -Recurse -Force node_modules/electron/dist dist
+          Pop-Location
+      - name: Upload official Electron runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-electron-runtime-v43.2.0-win-x64
+          path: electron-runtime/dist
+          if-no-files-found: error
+          retention-days: 1
