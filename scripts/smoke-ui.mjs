@@ -85,7 +85,7 @@ try {
 
   await page.getByRole('button', { name: 'Volver' }).click();
   await page.getByRole('button', { name: /Temperatura/ }).click();
-  await page.getByRole('button', { name: 'Analizar ahora' }).click();
+  await page.getByRole('button', { name: /Analizar ahora|Actualizar análisis/ }).click();
   await waitForText(page, '48 °C máximo');
   await waitForText(page, 'CPU');
   await page.screenshot({ path: 'artifacts/ui/support-temperature-evidence.png' });
