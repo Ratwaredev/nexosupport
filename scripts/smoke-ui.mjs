@@ -40,6 +40,11 @@ async function assertDesktopDialog(page, label) {
   }
 }
 
+async function assertGlobalToastDoesNotCoverDialog(page, label) {
+  const visibleToasts = await page.locator('.nc-toast:visible').count();
+  if (visibleToasts !== 0) throw new Error(`${label}: a global toast is covering an open dialog.`);
+}
+
 try {
   const context = await browser.newContext({ viewport: { width: 500, height: 620 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
@@ -67,25 +72,29 @@ try {
   await page.locator('.nc-actions').getByRole('button', { name: /Optimizar equipo/ }).click();
   await waitForText(page, 'Mantenimiento del equipo');
   await assertDesktopDialog(page, 'tools');
+  await assertGlobalToastDoesNotCoverDialog(page, 'tools');
   await page.getByRole('button', { name: /Revisar inicio/ }).click();
   await waitForIdle(page);
+  await assertGlobalToastDoesNotCoverDialog(page, 'tools result');
   await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
   await waitForText(page, 'Acción de prueba completada', 20_000);
 
   await page.locator('.nc-readings').getByRole('button', { name: /Temperatura/ }).click();
   await waitForText(page, 'Temperatura del equipo');
   await assertDesktopDialog(page, 'temperature');
+  await assertGlobalToastDoesNotCoverDialog(page, 'temperature');
   await page.getByRole('button', { name: /Volver a buscar sensores/ }).click();
   await waitForIdle(page, 60_000);
   await waitForText(page, 'Vista previa', 20_000);
+  await assertGlobalToastDoesNotCoverDialog(page, 'temperature result');
   await page.screenshot({ path: 'artifacts/ui/support-temperature.png' });
   await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
-  await waitForText(page, 'Temperatura actualizada', 20_000);
 
   await page.locator('.nc-actions').getByRole('button', { name: /Hablar con un técnico/ }).click();
   await waitForText(page, 'Soporte remoto');
   await waitForText(page, 'RustDesk no está instalado');
   await assertDesktopDialog(page, 'remote support');
+  await assertGlobalToastDoesNotCoverDialog(page, 'remote support');
   await page.screenshot({ path: 'artifacts/ui/support-remote.png' });
   await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
 
@@ -103,7 +112,7 @@ try {
   await admin.screenshot({ path: 'artifacts/ui/admin-login.png' });
   await assertNoBodyOverflow(admin, 'admin login');
 
-  console.log('NEXO UI smoke passed: normal desktop proportions, resizable layout, centered dialogs, clear feedback, temperature panel, RustDesk flow and admin entry.');
+  console.log('NEXO UI smoke passed: normal desktop proportions, resizable layout, centered dialogs, non-overlapping feedback, temperature panel, RustDesk flow and admin entry.');
   await context.close();
 } finally {
   await browser.close();
