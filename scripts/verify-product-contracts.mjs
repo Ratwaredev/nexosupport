@@ -93,7 +93,7 @@ requireMatch(tauriConfig, /resources\/rustdesk/, 'RustDesk debe viajar dentro de
 requireMatch(tauriConfig, /installerHooks/, 'El instalador debe ejecutar el hook de dependencias.');
 requireMatch(tauriConfig, /"installMode": "perMachine"/, 'La instalación debe ejecutarse con permisos suficientes.');
 requireMatch(hooks, /NSIS_HOOK_POSTINSTALL[\s\S]*?--silent-install/, 'NEXO debe instalar RustDesk durante su propia instalación.');
-requireMatch(remote, /pub async fn install_remote_tool/, 'Debe existir un reintento desde la app.');
+requireMatch(remote, /pub async fn managed_install_remote_tool/, 'Debe existir un reintento desde la app.');
 requireMatch(remote, /--get-id/, 'NEXO debe leer el ID de RustDesk.');
 requireMatch(remoteSupport, /id\?: string \| null/, 'La UI debe recibir el ID remoto.');
 requireMatch(support, /issue: status\.id \? `Soporte remoto · RustDesk \$\{status\.id\}`/, 'La solicitud debe incluir el ID remoto.');
@@ -105,7 +105,7 @@ requireMatch(nativeSensors, /value >= 5\.0[\s\S]*?value <= 125\.0/, 'Los sensore
 requireMatch(sensors, /temperatureTrusted/, 'La UI debe distinguir lecturas térmicas confiables.');
 requireMatch(diagnostics, /CREATE_NO_WINDOW/, 'PowerShell no debe abrir consolas.');
 requireMatch(app, /optimizer::optimize_temp_files/, 'El comando de optimización debe estar registrado.');
-requireMatch(app, /remote::install_remote_tool/, 'El instalador remoto debe estar registrado.');
+requireMatch(app, /remote::managed_install_remote_tool/, 'El instalador remoto debe estar registrado.');
 requireMatch(evidence, /Memoria[\s\S]*?Disco[\s\S]*?Seguridad/, 'El estado general debe mostrar evidencia concreta.');
 
 requireMatch(updater, /const CHECK_EVERY_MS = 60 \* 1000/, 'NEXO debe buscar actualizaciones sin reiniciar.');
