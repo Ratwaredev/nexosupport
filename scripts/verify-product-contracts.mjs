@@ -107,7 +107,7 @@ requireMatch(actions, /Temporales del usuario[\s\S]*?Temporales de Windows[\s\S]
 requireMatch(actions, /Perfiles de navegadores[\s\S]*?Cookies[\s\S]*?Sesiones[\s\S]*?Contraseñas guardadas/, 'La limpieza debe declarar las exclusiones de navegador.');
 requireMatch(actions, /LastWriteTime -lt \$cutoff/, 'NEXO solo debe limpiar temporales antiguos, no archivos activos recientes.');
 requireMatch(actions, /-Attributes !ReparsePoint/, 'La limpieza debe evitar atravesar enlaces o puntos de análisis.');
-forbidMatch(actions, /Chrome|Edge|Firefox|Brave|User Data|Cookies|Login Data|Web Data/, 'La limpieza no puede inspeccionar ni borrar perfiles de navegadores.');
+forbidMatch(actions, /Chrome|Edge|Firefox|Brave|User Data|Login Data|Web Data/, 'La limpieza no puede apuntar a perfiles o bases de datos de navegadores.');
 requireMatch(evidence, /Las sesiones, cookies, perfiles y contraseñas de navegadores no se tocaron/, 'El resultado debe confirmar claramente la protección de datos del navegador.');
 
 // RustDesk integration must detect the existing OSS client and stay user-authorized.
