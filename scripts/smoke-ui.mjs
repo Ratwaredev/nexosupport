@@ -9,7 +9,11 @@ async function waitForText(page, text, timeout = 20_000) {
   await page.getByText(text, { exact: false }).first().waitFor({ state: 'visible', timeout });
 }
 
-async function assertNoOverflow(page, label) {
+async function waitForIdle(page, timeout = 30_000) {
+  await page.locator('.nc-progress').waitFor({ state: 'hidden', timeout });
+}
+
+async function assertNoBodyOverflow(page, label) {
   const dimensions = await page.evaluate(() => ({
     bodyWidth: document.body.scrollWidth,
     viewportWidth: document.documentElement.clientWidth,
@@ -17,12 +21,32 @@ async function assertNoOverflow(page, label) {
     viewportHeight: document.documentElement.clientHeight
   }));
   if (dimensions.bodyWidth > dimensions.viewportWidth || dimensions.bodyHeight > dimensions.viewportHeight) {
-    throw new Error(`${label} overflow: ${JSON.stringify(dimensions)}`);
+    throw new Error(`${label} body overflow: ${JSON.stringify(dimensions)}`);
   }
 }
 
+async function assertDesktopDialog(page, label) {
+  const dialog = page.locator('.nc-sheet:visible, .nc-confirm:visible').first();
+  const box = await dialog.boundingBox();
+  const viewport = page.viewportSize();
+  if (!box || !viewport) throw new Error(`${label}: dialog is not visible.`);
+  if (box.width >= viewport.width - 24 || box.height >= viewport.height - 24) {
+    throw new Error(`${label}: dialog covers almost the full app: ${JSON.stringify({ box, viewport })}`);
+  }
+  const horizontalMargin = Math.min(box.x, viewport.width - box.x - box.width);
+  const verticalMargin = Math.min(box.y, viewport.height - box.y - box.height);
+  if (horizontalMargin < 18 || verticalMargin < 18) {
+    throw new Error(`${label}: dialog is not centered with safe margins: ${JSON.stringify({ box, viewport })}`);
+  }
+}
+
+async function assertGlobalToastDoesNotCoverDialog(page, label) {
+  const visibleToasts = await page.locator('.nc-toast:visible').count();
+  if (visibleToasts !== 0) throw new Error(`${label}: a global toast is covering an open dialog.`);
+}
+
 try {
-  const context = await browser.newContext({ viewport: { width: 420, height: 430 }, deviceScaleFactor: 1 });
+  const context = await browser.newContext({ viewport: { width: 500, height: 620 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
@@ -31,37 +55,52 @@ try {
   await page.getByPlaceholder('Código de activación').fill('DEMO-PAIR');
   await page.getByRole('button', { name: 'Continuar' }).click();
   await waitForText(page, '¿Cómo querés usar NEXO?');
+  await assertDesktopDialog(page, 'activation mode');
   await page.getByRole('button', { name: /Proteger esta PC/ }).click();
   await waitForText(page, 'Revisión pendiente', 20_000);
-  await assertNoOverflow(page, 'support home before review');
+  await assertNoBodyOverflow(page, 'support home before review');
 
-  await page.getByRole('button', { name: /^Revisar$/ }).click();
-  await waitForText(page, 'Revisión lista', 25_000);
+  await page.getByRole('button', { name: /Revisar ahora/ }).click();
+  await waitForText(page, 'Revisión terminada', 25_000);
   await waitForText(page, 'Tu PC está en orden', 20_000);
   await page.screenshot({ path: 'artifacts/ui/support-home.png' });
-  await assertNoOverflow(page, 'support home after review');
+  await assertNoBodyOverflow(page, 'support home after review');
 
-  await page.locator('.nc-actions').getByRole('button', { name: /Internet/ }).click();
+  await page.locator('.nc-actions').getByRole('button', { name: /Revisar Internet/ }).click();
   await waitForText(page, 'La conexión responde correctamente', 20_000);
 
-  await page.locator('.nc-actions').getByRole('button', { name: /Optimizar/ }).click();
-  await waitForText(page, '¿Qué querés mejorar?');
+  await page.locator('.nc-actions').getByRole('button', { name: /Optimizar equipo/ }).click();
+  await waitForText(page, 'Mantenimiento del equipo');
+  await assertDesktopDialog(page, 'tools');
+  await assertGlobalToastDoesNotCoverDialog(page, 'tools');
   await page.getByRole('button', { name: /Revisar inicio/ }).click();
-  await waitForText(page, 'Acción de prueba completada', 20_000);
+  await waitForIdle(page);
+  await assertGlobalToastDoesNotCoverDialog(page, 'tools result');
   await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  await waitForText(page, 'Acción de prueba completada', 20_000);
 
-  await page.locator('.nc-readings').getByRole('button', { name: /Temp\./ }).click();
+  await page.locator('.nc-readings').getByRole('button', { name: /Temperatura/ }).click();
   await waitForText(page, 'Temperatura del equipo');
-  await page.getByRole('button', { name: /Volver a leer/ }).click();
-  await waitForText(page, 'Temperatura actualizada', 20_000);
+  await assertDesktopDialog(page, 'temperature');
+  await assertGlobalToastDoesNotCoverDialog(page, 'temperature');
+  await page.getByRole('button', { name: /Volver a buscar sensores/ }).click();
+  await waitForIdle(page, 60_000);
+  await waitForText(page, 'Vista previa', 20_000);
+  await assertGlobalToastDoesNotCoverDialog(page, 'temperature result');
   await page.screenshot({ path: 'artifacts/ui/support-temperature.png' });
   await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
 
-  await page.locator('.nc-actions').getByRole('button', { name: /Técnico/ }).click();
+  await page.locator('.nc-actions').getByRole('button', { name: /Hablar con un técnico/ }).click();
   await waitForText(page, 'Soporte remoto');
   await waitForText(page, 'RustDesk no está instalado');
+  await assertDesktopDialog(page, 'remote support');
+  await assertGlobalToastDoesNotCoverDialog(page, 'remote support');
   await page.screenshot({ path: 'artifacts/ui/support-remote.png' });
   await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
+
+  await page.setViewportSize({ width: 640, height: 760 });
+  await assertNoBodyOverflow(page, 'resized support window');
+  await page.screenshot({ path: 'artifacts/ui/support-resized.png' });
 
   if (pageErrors.length) throw new Error(`Errores de página: ${pageErrors.join(' | ')}`);
 
@@ -71,9 +110,9 @@ try {
   await waitForText(admin, 'Administración');
   await admin.getByRole('button', { name: 'Entrar' }).waitFor({ state: 'visible' });
   await admin.screenshot({ path: 'artifacts/ui/admin-login.png' });
-  await assertNoOverflow(admin, 'admin login');
+  await assertNoBodyOverflow(admin, 'admin login');
 
-  console.log('NEXO UI smoke passed: compact layout, explicit review, trusted temperature, tools, RustDesk flow, admin entry and no viewport overflow.');
+  console.log('NEXO UI smoke passed: normal desktop proportions, resizable layout, centered dialogs, non-overlapping feedback, temperature panel, RustDesk flow and admin entry.');
   await context.close();
 } finally {
   await browser.close();

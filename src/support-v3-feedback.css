@@ -1,0 +1,35 @@
+.nc-app:has(> .nc-toast):not(:has(> .nc-backdrop)) .nc-home {
+  padding-top: 92px;
+}
+
+.nc-app:has(> .nc-toast):not(:has(> .nc-backdrop)) .nc-activate {
+  padding-top: 116px;
+}
+
+.nc-app:has(> .nc-backdrop) > .nc-toast {
+  display: none;
+}
+
+.nc-backdrop {
+  background: rgba(30, 33, 43, .17);
+  backdrop-filter: none;
+}
+
+.nc-toast {
+  animation: nc-feedback-slide .16s ease-out;
+}
+
+.nc-sheet,
+.nc-confirm {
+  animation: nc-dialog-slide .16s ease-out;
+}
+
+@keyframes nc-feedback-slide {
+  from { transform: translateY(-6px); }
+  to { transform: translateY(0); }
+}
+
+@keyframes nc-dialog-slide {
+  from { transform: translateY(6px) scale(.99); }
+  to { transform: translateY(0) scale(1); }
+}

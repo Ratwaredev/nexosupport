@@ -23,6 +23,7 @@ export type SensorSummary = {
   cpuTemperatureC: number | null;
   gpuTemperatureC: number | null;
   storageTemperatureC: number | null;
+  systemTemperatureC: number | null;
   cpuLoadPercent: number | null;
   gpuLoadPercent: number | null;
   fanRpm: number | null;
@@ -46,7 +47,8 @@ export async function readHardwareSensors(elevated = false): Promise<HardwareSna
       { hardwareType: 'Cpu', hardwareName: 'Procesador demo', sensorType: 'Temperature', sensorName: 'CPU Package', value: 48 },
       { hardwareType: 'Cpu', hardwareName: 'Procesador demo', sensorType: 'Load', sensorName: 'CPU Total', value: 22 },
       { hardwareType: 'GpuAmd', hardwareName: 'GPU demo', sensorType: 'Temperature', sensorName: 'GPU Core', value: 45 },
-      { hardwareType: 'Storage', hardwareName: 'SSD demo', sensorType: 'Temperature', sensorName: 'Temperature', value: 39 }
+      { hardwareType: 'Storage', hardwareName: 'SSD demo', sensorType: 'Temperature', sensorName: 'Temperature', value: 39 },
+      { hardwareType: 'Motherboard', hardwareName: 'Placa demo', sensorType: 'Temperature', sensorName: 'System', value: 42 }
     ]
   };
 }
@@ -79,10 +81,10 @@ function firstValue(snapshot: HardwareSnapshot, predicate: (sensor: HardwareSens
 }
 
 function sourceLabel(source: HardwareSnapshot['source']) {
-  if (source === 'native-helper' || source === 'libre-hardware-monitor') return 'Sensor directo';
-  if (source === 'acpi-fallback') return 'Lectura ACPI aproximada';
+  if (source === 'native-helper' || source === 'libre-hardware-monitor') return 'Lectura directa del hardware';
+  if (source === 'acpi-fallback') return 'Temperatura general aproximada';
   if (source === 'browser-demo') return 'Vista previa';
-  return 'Sin sensor compatible';
+  return 'No detectado';
 }
 
 export function summarizeHardware(snapshot: HardwareSnapshot): SensorSummary {
@@ -95,12 +97,20 @@ export function summarizeHardware(snapshot: HardwareSnapshot): SensorSummary {
   const cpuTemperatureC = preferredCpu ?? (cpuTemperatures.length ? Math.max(...cpuTemperatures.map((sensor) => sensor.value)) : null);
   const gpuTemperatureC = firstValue(snapshot, (sensor) => typeOf(sensor).includes('gpu') && plausibleTemperature(sensor));
   const storageTemperatureC = firstValue(snapshot, (sensor) => typeOf(sensor).includes('storage') && plausibleTemperature(sensor));
-  const temperatureAvailable = [cpuTemperatureC, gpuTemperatureC, storageTemperatureC].some((value) => value != null);
+  const systemTemperatureC = firstValue(snapshot, (sensor) => {
+    const type = typeOf(sensor);
+    return plausibleTemperature(sensor)
+      && !type.includes('cpu')
+      && !type.includes('gpu')
+      && !type.includes('storage');
+  });
+  const temperatureAvailable = [cpuTemperatureC, gpuTemperatureC, storageTemperatureC, systemTemperatureC].some((value) => value != null);
 
   return {
     cpuTemperatureC,
     gpuTemperatureC,
     storageTemperatureC,
+    systemTemperatureC,
     cpuLoadPercent: firstValue(snapshot, (sensor) => typeOf(sensor).includes('cpu') && sensorTypeOf(sensor) === 'load' && /(total|cpu total|max)/.test(nameOf(sensor))),
     gpuLoadPercent: firstValue(snapshot, (sensor) => typeOf(sensor).includes('gpu') && sensorTypeOf(sensor) === 'load' && /(core|gpu)/.test(nameOf(sensor))),
     fanRpm: firstValue(snapshot, (sensor) => sensorTypeOf(sensor) === 'fan' && sensor.value >= 0),

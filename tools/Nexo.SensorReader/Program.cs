@@ -64,14 +64,17 @@ internal static class Program
                     elevated,
                     !elevated,
                     !elevated
-                        ? "Windows puede requerir permiso para acceder a los sensores del firmware."
-                        : "El lector no pudo acceder a sensores compatibles incluso con permiso.",
+                        ? "Para acceder a los sensores internos puede hacer falta autorización de administrador."
+                        : "No se pudo abrir el controlador de sensores del equipo.",
                     Array.Empty<HardwareSensor>());
             }
+
             var visitor = new UpdateVisitor();
-            computer.Accept(visitor);
-            Thread.Sleep(450);
-            computer.Accept(visitor);
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                computer.Accept(visitor);
+                Thread.Sleep(attempt == 0 ? 700 : 450);
+            }
 
             var sensors = new List<HardwareSensor>();
             foreach (var hardware in computer.Hardware)
@@ -79,16 +82,29 @@ internal static class Program
                 ReadHardware(hardware, sensors);
             }
 
-            var hasTemperature = sensors.Any(sensor => sensor.SensorType.Equals("Temperature", StringComparison.OrdinalIgnoreCase));
-            var hasCpuTemperature = sensors.Any(sensor =>
-                sensor.SensorType.Equals("Temperature", StringComparison.OrdinalIgnoreCase) &&
+            var temperatureSensors = sensors
+                .Where(sensor => sensor.SensorType.Equals("Temperature", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            var hasTemperature = temperatureSensors.Length > 0;
+            var hasCpuTemperature = temperatureSensors.Any(sensor =>
                 sensor.HardwareType.Contains("Cpu", StringComparison.OrdinalIgnoreCase));
-            var permissionRequired = !elevated && !hasCpuTemperature;
-            var note = hasTemperature
-                ? "Sensores leídos directamente del hardware."
-                : permissionRequired
-                    ? "Windows puede requerir permiso para acceder a los sensores del firmware."
-                    : "El fabricante no expone temperaturas compatibles a Windows.";
+            var hasDirectComponentTemperature = temperatureSensors.Any(sensor =>
+                sensor.HardwareType.Contains("Cpu", StringComparison.OrdinalIgnoreCase)
+                || sensor.HardwareType.Contains("Gpu", StringComparison.OrdinalIgnoreCase)
+                || sensor.HardwareType.Contains("Storage", StringComparison.OrdinalIgnoreCase));
+
+            // No CPU temperature does not automatically mean a Windows permission problem.
+            // We request elevation only when the non-elevated scan found no plausible temperature at all.
+            var permissionRequired = !elevated && !hasTemperature;
+            var note = hasCpuTemperature
+                ? "Temperatura del procesador leída directamente del hardware."
+                : hasDirectComponentTemperature
+                    ? "Se detectaron temperaturas de componentes, pero el procesador no expuso una lectura."
+                    : hasTemperature
+                        ? "Se detectó una temperatura general del equipo. Puede no representar la CPU."
+                        : permissionRequired
+                            ? "No apareció ningún sensor. Reintentá como administrador para habilitar el acceso al hardware."
+                            : "Incluso con autorización, este equipo no expone temperaturas compatibles.";
 
             return new HardwareSnapshot(
                 DateTimeOffset.UtcNow.ToString("O"),
