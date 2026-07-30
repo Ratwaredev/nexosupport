@@ -100,7 +100,9 @@ requireMatch(support, /optimizerPhase/, 'El optimizador debe tener estados de an
 requireMatch(support, /scanOptimizer[\s\S]*?runAgentAction\('temp_scan'\)/, 'Optimizar debe analizar antes de borrar.');
 requireMatch(support, /cleanOptimizer[\s\S]*?runAgentAction\('clean_temp_files'\)/, 'La limpieza debe ser una acción separada y confirmada.');
 requireMatch(support, /RocketStage/, 'El flujo de optimización debe mostrar la nave espacial.');
-requireMatch(supportCss, /\.nx-rocket-stage[\s\S]*?\.nx-rocket[\s\S]*?\.nx-planet/, 'Falta la experiencia visual de vuelo del optimizador.');
+requireMatch(supportCss, /\.nx-rocket-stage/, 'Falta el escenario visual del optimizador.');
+requireMatch(supportCss, /\.nx-rocket\b/, 'Falta la nave del optimizador.');
+requireMatch(supportCss, /\.nx-planet\b/, 'Falta el planeta del optimizador.');
 requireMatch(support, /chatPending[\s\S]*?toolPending/, 'Chat y herramientas deben tener confirmaciones independientes.');
 requireMatch(supportExtraCss, /\.nx-tool-confirm/, 'La confirmación dentro de Herramientas debe tener feedback propio.');
 requireMatch(actions, /Temporales del usuario[\s\S]*?Temporales de Windows[\s\S]*?Volcados de errores[\s\S]*?Informes de errores/, 'La limpieza debe usar una lista blanca explícita.');
