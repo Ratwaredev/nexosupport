@@ -36,8 +36,14 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "icon": ["icons/icon.ico"],
-    "resources": ["resources/sensor-helper/"],
-    "targets": ["nsis"]
+    "resources": ["resources/sensor-helper/", "resources/rustdesk/"],
+    "targets": ["nsis"],
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh",
+        "installMode": "perMachine"
+      }
+    }
   },
   "plugins": {
     "updater": {
