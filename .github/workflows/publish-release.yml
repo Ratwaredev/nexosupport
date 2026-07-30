@@ -3,6 +3,9 @@ name: Publish NEXO Support release
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
   workflow_dispatch:
 
 concurrency:
@@ -131,15 +134,16 @@ jobs:
           tagName: v__VERSION__
           releaseName: NEXO Support v__VERSION__
           releaseBody: |
-            Actualización profesional de NEXO Support.
+            NEXO ahora funciona como un agente técnico con evidencia visible.
 
-            - Interfaz compacta, alineada y con feedback visible por acción.
-            - Diagnósticos y mantenimiento ejecutados fuera del hilo de interfaz.
-            - PowerShell y herramientas nativas sin ventanas de consola.
-            - Temperaturas imposibles descartadas y lecturas ACPI marcadas como aproximadas.
-            - NEXO Control abre de forma confiable.
-            - Detección y apertura de RustDesk instalado para escritorio remoto autorizado.
-            - Release bloqueado automáticamente si falla el build, los contratos o las pruebas visuales.
+            - Cada herramienta abre su propio estado y no ejecuta análisis al tocarla.
+            - Los datos recientes se reutilizan; el usuario decide cuándo volver a analizar.
+            - El chat muestra RAM, disco, red, seguridad, inicio y temperatura con valores concretos.
+            - Optimización segura con análisis previo, confirmación y animación de nave espacial.
+            - La limpieza usa una lista blanca de temporales antiguos y no toca cookies, sesiones, perfiles, historial ni contraseñas de navegadores.
+            - RustDesk se detecta y abre únicamente con una acción visible; la conexión siempre requiere aceptación del usuario.
+            - Diagnósticos y mantenimiento se ejecutan fuera del hilo de interfaz y sin ventanas de consola.
+            - El release se bloquea si fallan el build, Rust, los contratos o las pruebas visuales.
           releaseDraft: false
           prerelease: false
           updaterJsonPreferNsis: true
