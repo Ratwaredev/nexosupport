@@ -27,7 +27,8 @@ jobs:
         shell: pwsh
         run: |
           $parts = Get-ChildItem "forge-build/payload/part-*" | Sort-Object Name
-          if ($parts.Count -ne 13) { throw "Expected 13 payload files, found $($parts.Count)" }
+          Write-Host "Payload files: $($parts.Name -join ', ')"
+          if ($parts.Count -ne 15) { throw "Expected 15 payload files, found $($parts.Count)" }
           $payload = ($parts | ForEach-Object { Get-Content $_.FullName -Raw }) -join ""
           [IO.File]::WriteAllBytes("forge-runtime.tar.xz", [Convert]::FromBase64String($payload))
           New-Item -ItemType Directory -Force -Path forge-app | Out-Null
