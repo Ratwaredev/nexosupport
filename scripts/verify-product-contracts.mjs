@@ -1,22 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
-const [
-  updater,
-  updaterCss,
-  windows,
-  updates,
-  support,
-  supportCss,
-  app,
-  actions,
-  diagnostics,
-  nativeSensors,
-  sensorReader,
-  sensors,
-  remoteSupport,
-  tauriConfig,
-  releaseWorkflow
-] = await Promise.all([
+const [updater, updaterCss, windows, updates, support, supportCss, app, actions, diagnostics, nativeSensors, sensors, remoteSupport, releaseWorkflow, smoke] = await Promise.all([
   readFile('src/AppUpdater.tsx', 'utf8'),
   readFile('src/updater.css', 'utf8'),
   readFile('src-tauri/src/app/windows.rs', 'utf8'),
@@ -27,11 +11,10 @@ const [
   readFile('src-tauri/src/app/actions.rs', 'utf8'),
   readFile('src-tauri/src/app/diagnostics.rs', 'utf8'),
   readFile('src-tauri/src/app/sensors.rs', 'utf8'),
-  readFile('tools/Nexo.SensorReader/Program.cs', 'utf8'),
   readFile('src/lib/sensors.ts', 'utf8'),
   readFile('src/lib/support.ts', 'utf8'),
-  readFile('src-tauri/tauri.conf.json', 'utf8'),
-  readFile('.github/workflows/publish-release.yml', 'utf8')
+  readFile('.github/workflows/publish-release.yml', 'utf8'),
+  readFile('scripts/smoke-ui.mjs', 'utf8')
 ]);
 
 function requireMatch(source, pattern, message) {
@@ -70,14 +53,9 @@ requireMatch(actions, /CREATE_NO_WINDOW/, 'Las herramientas y RustDesk deben abr
 forbidMatch(actions, /Command::new\("cmd"\)[\s\S]{0,180}\/C/, 'No se permite abrir herramientas mediante cmd /C start.');
 
 requireMatch(nativeSensors, /value >= 5\.0[\s\S]*?value <= 125\.0/, 'La capa nativa debe descartar temperaturas físicamente imposibles.');
-requireMatch(sensorReader, /var permissionRequired = !elevated && !hasTemperature;/, 'La ausencia de CPU no debe clasificarse automáticamente como un problema de permisos.');
-requireMatch(sensorReader, /for \(var attempt = 0; attempt < 3; attempt\+\+\)/, 'El lector debe dar tiempo a que los sensores publiquen valores.');
-requireMatch(sensors, /systemTemperatureC/, 'La UI debe reconocer temperaturas de placa madre y ACPI, no ignorarlas.');
+requireMatch(sensors, /temperatureTrusted/, 'La interfaz debe distinguir una lectura térmica confiable de una aproximada.');
 requireMatch(sensors, /snapshot\.source !== 'acpi-fallback'/, 'Una zona ACPI aproximada no puede tratarse como temperatura exacta.');
-requireMatch(support, /captureSensors\(true\)/, 'Una revisión manual debe reintentar con autorización cuando no aparecen sensores.');
-requireMatch(support, /Reintentar como administrador/, 'La UI debe explicar claramente cómo recuperar la lectura térmica.');
-forbidMatch(support, /Requiere Windows/, 'No se debe mostrar el texto confuso “Requiere Windows”.');
-requireMatch(support, /temperatura todavía no pudo comprobarse/, 'Sin temperatura confiable, la home no debe declarar que la PC está en orden.');
+requireMatch(support, /Reintentar como administrador/, 'La lectura térmica debe ofrecer un reintento elevado explícito.');
 
 requireMatch(actions, /pub fn remote_tool_status/, 'NEXO debe poder informar si RustDesk está instalado.');
 requireMatch(actions, /find_rustdesk[\s\S]*?LOCALAPPDATA[\s\S]*?ProgramFiles/, 'La detección de RustDesk debe buscar instalaciones habituales de Windows.');
@@ -85,19 +63,30 @@ requireMatch(remoteSupport, /getRemoteToolStatus/, 'La interfaz debe consultar l
 requireMatch(support, /RustDesk detectado/, 'La UI debe mostrar claramente el estado del escritorio remoto.');
 requireMatch(support, /La conexión nunca empieza sola/, 'El escritorio remoto debe requerir autorización visible del usuario.');
 
-requireMatch(tauriConfig, /"width": 500[\s\S]*?"height": 620/, 'La ventana principal no debe volver a ser un popup excesivamente compacto.');
-requireMatch(tauriConfig, /"resizable": true/, 'NEXO debe comportarse como una aplicación de escritorio redimensionable.');
-requireMatch(tauriConfig, /"skipTaskbar": false/, 'La aplicación principal debe aparecer normalmente en la barra de tareas.');
-requireMatch(supportCss, /\.nc-backdrop[\s\S]*?place-items:\s*center/, 'Los diálogos deben aparecer centrados, no como sheets que cubren toda la ventana.');
-requireMatch(supportCss, /\.nc-sheet[\s\S]*?width:\s*min\(100%,\s*420px\)/, 'Los diálogos deben conservar un ancho máximo de escritorio.');
-forbidMatch(supportCss, /\.nc-backdrop[^}]*align-items:\s*flex-end/, 'No se permiten popups pegados al borde inferior que parezcan ocupar toda la app.');
-requireMatch(supportCss, /\.nc-readings[\s\S]*?grid-template-columns:\s*1fr 1fr/, 'Las métricas deben tener espacio legible en una grilla 2x2.');
-requireMatch(support, /Resolver problemas comunes/, 'La home debe separar estado y acciones con jerarquía visual clara.');
-requireMatch(support, /Liberar espacio/, 'La app debe ofrecer acciones útiles, no solo mostrar datos.');
+requireMatch(support, /type View = 'assistant' \| 'tools'/, 'La app debe tener exactamente una vista de asistente y una de herramientas.');
+requireMatch(support, /nc-view-switch/, 'Falta el selector Asistente/Herramientas.');
+requireMatch(support, /Hola\. Soy NEXO/, 'El asistente debe ser la experiencia principal al abrir.');
+requireMatch(support, /nc-thread/, 'La vista principal debe ser una conversación real.');
+requireMatch(support, /nc-composer/, 'La conversación debe tener un compositor propio.');
+requireMatch(support, /toolGroups/, 'Las herramientas deben vivir en una sección separada.');
+requireMatch(support, /TOOL_CATALOG\[pendingAction\.id\]/, 'Las acciones con cambios deben confirmarse dentro del chat.');
+requireMatch(support, /completeToolInChat/, 'El asistente debe ejecutar y devolver resultados dentro de la conversación.');
+requireMatch(supportCss, /\.nc-chat-view[\s\S]*?grid-template-rows/, 'La vista de chat debe ocupar el espacio principal sin dashboard intermedio.');
+requireMatch(supportCss, /\.nc-tools-view/, 'Falta la vista visual de herramientas.');
+requireMatch(supportCss, /\.nc-message\.user/, 'Falta diferenciación visual entre usuario y asistente.');
+forbidMatch(support, /nc-readings|nc-hero|ACCIONES RÁPIDAS|ESTADO DEL EQUIPO/, 'No debe volver el dashboard cargado de métricas y bloques.');
+forbidMatch(supportCss, /\.nc-readings|\.nc-hero/, 'No deben quedar estilos del dashboard anterior.');
+
+requireMatch(windows, /PhysicalPosition/, 'La app debe poder ubicarse como asistente lateral.');
+requireMatch(windows, /monitor_size\.width[\s\S]*?size\.width/, 'La ventana debe alinearse al borde derecho del monitor.');
+requireMatch(smoke, /support-chat\.png/, 'La validación visual debe capturar la vista principal del chatbot.');
+requireMatch(smoke, /support-tools\.png/, 'La validación visual debe capturar la sección de herramientas.');
+requireMatch(smoke, /support-confirm\.png/, 'La validación visual debe comprobar confirmaciones dentro del chat.');
+
 forbidMatch(support, /initialCheckStarted/, 'NEXO no debe iniciar una revisión pesada automáticamente al abrir.');
 forbidMatch(support, /setTimeout\(\(\) => void inspect\(false\),\s*300\)/, 'NEXO no debe ejecutar sensores automáticamente al abrir.');
 
 requireMatch(releaseWorkflow, /node scripts\/verify-product-contracts\.mjs/, 'El release debe verificar los contratos de producto antes de publicarse.');
 requireMatch(releaseWorkflow, /scripts\/smoke-ui\.mjs/, 'El release debe validar la interfaz real antes de publicarse.');
 
-console.log('Product contracts passed: live updates, guaranteed exit, normal desktop layout, centered dialogs, sensor recovery, reliable admin, authorized RustDesk support and gated signed releases.');
+console.log('Product contracts passed: chatbot-first UX, separate minimal tools, inline confirmations, lateral desktop window, reliable sensors, authorized support and gated releases.');

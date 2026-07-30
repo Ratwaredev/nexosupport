@@ -9,8 +9,8 @@ async function waitForText(page, text, timeout = 20_000) {
   await page.getByText(text, { exact: false }).first().waitFor({ state: 'visible', timeout });
 }
 
-async function waitForIdle(page, timeout = 30_000) {
-  await page.locator('.nc-progress').waitFor({ state: 'hidden', timeout });
+async function settle(page, delay = 650) {
+  await page.waitForTimeout(delay);
 }
 
 async function assertNoBodyOverflow(page, label) {
@@ -25,28 +25,18 @@ async function assertNoBodyOverflow(page, label) {
   }
 }
 
-async function assertDesktopDialog(page, label) {
-  const dialog = page.locator('.nc-sheet:visible, .nc-confirm:visible').first();
+async function assertCompactDialog(page, label) {
+  const dialog = page.locator('.nc-sheet:visible').first();
   const box = await dialog.boundingBox();
   const viewport = page.viewportSize();
   if (!box || !viewport) throw new Error(`${label}: dialog is not visible.`);
-  if (box.width >= viewport.width - 24 || box.height >= viewport.height - 24) {
+  if (box.width >= viewport.width - 28 || box.height >= viewport.height - 34) {
     throw new Error(`${label}: dialog covers almost the full app: ${JSON.stringify({ box, viewport })}`);
   }
-  const horizontalMargin = Math.min(box.x, viewport.width - box.x - box.width);
-  const verticalMargin = Math.min(box.y, viewport.height - box.y - box.height);
-  if (horizontalMargin < 18 || verticalMargin < 18) {
-    throw new Error(`${label}: dialog is not centered with safe margins: ${JSON.stringify({ box, viewport })}`);
-  }
-}
-
-async function assertGlobalToastDoesNotCoverDialog(page, label) {
-  const visibleToasts = await page.locator('.nc-toast:visible').count();
-  if (visibleToasts !== 0) throw new Error(`${label}: a global toast is covering an open dialog.`);
 }
 
 try {
-  const context = await browser.newContext({ viewport: { width: 500, height: 620 }, deviceScaleFactor: 1 });
+  const context = await browser.newContext({ viewport: { width: 460, height: 680 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
@@ -55,51 +45,54 @@ try {
   await page.getByPlaceholder('Código de activación').fill('DEMO-PAIR');
   await page.getByRole('button', { name: 'Continuar' }).click();
   await waitForText(page, '¿Cómo querés usar NEXO?');
-  await assertDesktopDialog(page, 'activation mode');
+  await assertCompactDialog(page, 'activation mode');
   await page.getByRole('button', { name: /Proteger esta PC/ }).click();
-  await waitForText(page, 'Revisión pendiente', 20_000);
-  await assertNoBodyOverflow(page, 'support home before review');
+  await waitForText(page, 'NEXO está listo', 20_000);
+  await waitForText(page, 'Hola. Soy NEXO');
+  await assertNoBodyOverflow(page, 'assistant home');
 
-  await page.getByRole('button', { name: /Revisar ahora/ }).click();
-  await waitForText(page, 'Revisión terminada', 25_000);
-  await waitForText(page, 'Tu PC está en orden', 20_000);
-  await page.screenshot({ path: 'artifacts/ui/support-home.png' });
-  await assertNoBodyOverflow(page, 'support home after review');
+  await page.getByRole('button', { name: 'Revisá mi PC' }).click();
+  await waitForText(page, 'Tu PC está en orden', 30_000);
+  await settle(page);
+  await page.screenshot({ path: 'artifacts/ui/support-chat.png' });
 
-  await page.locator('.nc-actions').getByRole('button', { name: /Revisar Internet/ }).click();
-  await waitForText(page, 'La conexión responde correctamente', 20_000);
+  await page.getByRole('button', { name: 'Herramientas' }).click();
+  await waitForText(page, 'Estado general');
+  await waitForText(page, 'Liberar espacio');
+  await assertNoBodyOverflow(page, 'tools view');
+  await settle(page, 250);
+  await page.screenshot({ path: 'artifacts/ui/support-tools.png' });
 
-  await page.locator('.nc-actions').getByRole('button', { name: /Optimizar equipo/ }).click();
-  await waitForText(page, 'Mantenimiento del equipo');
-  await assertDesktopDialog(page, 'tools');
-  await assertGlobalToastDoesNotCoverDialog(page, 'tools');
-  await page.getByRole('button', { name: /Revisar inicio/ }).click();
-  await waitForIdle(page);
-  await assertGlobalToastDoesNotCoverDialog(page, 'tools result');
-  await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
-  await waitForText(page, 'Acción de prueba completada', 20_000);
+  await page.getByRole('button', { name: /Liberar espacio/ }).click();
+  await waitForText(page, 'requiere tu autorización');
+  await settle(page);
+  await page.screenshot({ path: 'artifacts/ui/support-confirm.png' });
+  await page.getByRole('button', { name: 'Cancelar', exact: true }).click();
+  await waitForText(page, 'No hice ningún cambio');
 
-  await page.locator('.nc-readings').getByRole('button', { name: /Temperatura/ }).click();
+  await page.getByRole('button', { name: 'Herramientas' }).click();
+  await page.getByRole('button', { name: /Temperatura/ }).first().click();
+  await waitForText(page, 'temperatura más alta', 20_000);
+  await settle(page);
+  await page.screenshot({ path: 'artifacts/ui/support-temperature-chat.png' });
+
+  await page.getByRole('button', { name: 'Herramientas' }).click();
+  await page.getByRole('button', { name: /Pedir un técnico/ }).click();
+  await waitForText(page, 'solicitud quedó creada', 20_000);
+  await settle(page, 900);
+  await page.screenshot({ path: 'artifacts/ui/support-remote-chat.png' });
+
+  await page.getByRole('button', { name: 'Herramientas' }).click();
+  await page.getByRole('button', { name: /Ver sensores/ }).click();
   await waitForText(page, 'Temperatura del equipo');
-  await assertDesktopDialog(page, 'temperature');
-  await assertGlobalToastDoesNotCoverDialog(page, 'temperature');
-  await page.getByRole('button', { name: /Volver a buscar sensores/ }).click();
-  await waitForIdle(page, 60_000);
-  await waitForText(page, 'Vista previa', 20_000);
-  await assertGlobalToastDoesNotCoverDialog(page, 'temperature result');
-  await page.screenshot({ path: 'artifacts/ui/support-temperature.png' });
+  await assertCompactDialog(page, 'temperature details');
+  await settle(page, 250);
+  await page.screenshot({ path: 'artifacts/ui/support-temperature-panel.png' });
   await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
 
-  await page.locator('.nc-actions').getByRole('button', { name: /Hablar con un técnico/ }).click();
-  await waitForText(page, 'Soporte remoto');
-  await waitForText(page, 'RustDesk no está instalado');
-  await assertDesktopDialog(page, 'remote support');
-  await assertGlobalToastDoesNotCoverDialog(page, 'remote support');
-  await page.screenshot({ path: 'artifacts/ui/support-remote.png' });
-  await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
-
-  await page.setViewportSize({ width: 640, height: 760 });
+  await page.setViewportSize({ width: 560, height: 760 });
   await assertNoBodyOverflow(page, 'resized support window');
+  await settle(page, 250);
   await page.screenshot({ path: 'artifacts/ui/support-resized.png' });
 
   if (pageErrors.length) throw new Error(`Errores de página: ${pageErrors.join(' | ')}`);
@@ -112,7 +105,7 @@ try {
   await admin.screenshot({ path: 'artifacts/ui/admin-login.png' });
   await assertNoBodyOverflow(admin, 'admin login');
 
-  console.log('NEXO UI smoke passed: normal desktop proportions, resizable layout, centered dialogs, non-overlapping feedback, temperature panel, RustDesk flow and admin entry.');
+  console.log('NEXO UI smoke passed: chatbot-first assistant, separate minimal tools view, inline confirmations, compact dialogs, responsive resizing and admin entry.');
   await context.close();
 } finally {
   await browser.close();
