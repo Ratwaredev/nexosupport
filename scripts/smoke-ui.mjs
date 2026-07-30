@@ -9,6 +9,10 @@ async function waitForText(page, text, timeout = 20_000) {
   await page.getByText(text, { exact: false }).first().waitFor({ state: 'visible', timeout });
 }
 
+async function settle(page, delay = 650) {
+  await page.waitForTimeout(delay);
+}
+
 async function assertNoBodyOverflow(page, label) {
   const dimensions = await page.evaluate(() => ({
     bodyWidth: document.body.scrollWidth,
@@ -49,16 +53,19 @@ try {
 
   await page.getByRole('button', { name: 'Revisá mi PC' }).click();
   await waitForText(page, 'Tu PC está en orden', 30_000);
+  await settle(page);
   await page.screenshot({ path: 'artifacts/ui/support-chat.png' });
 
   await page.getByRole('button', { name: 'Herramientas' }).click();
   await waitForText(page, 'Estado general');
   await waitForText(page, 'Liberar espacio');
   await assertNoBodyOverflow(page, 'tools view');
+  await settle(page, 250);
   await page.screenshot({ path: 'artifacts/ui/support-tools.png' });
 
   await page.getByRole('button', { name: /Liberar espacio/ }).click();
   await waitForText(page, 'requiere tu autorización');
+  await settle(page);
   await page.screenshot({ path: 'artifacts/ui/support-confirm.png' });
   await page.getByRole('button', { name: 'Cancelar', exact: true }).click();
   await waitForText(page, 'No hice ningún cambio');
@@ -66,22 +73,26 @@ try {
   await page.getByRole('button', { name: 'Herramientas' }).click();
   await page.getByRole('button', { name: /Temperatura/ }).first().click();
   await waitForText(page, 'temperatura más alta', 20_000);
+  await settle(page);
   await page.screenshot({ path: 'artifacts/ui/support-temperature-chat.png' });
 
   await page.getByRole('button', { name: 'Herramientas' }).click();
   await page.getByRole('button', { name: /Pedir un técnico/ }).click();
   await waitForText(page, 'solicitud quedó creada', 20_000);
+  await settle(page, 900);
   await page.screenshot({ path: 'artifacts/ui/support-remote-chat.png' });
 
   await page.getByRole('button', { name: 'Herramientas' }).click();
   await page.getByRole('button', { name: /Ver sensores/ }).click();
   await waitForText(page, 'Temperatura del equipo');
   await assertCompactDialog(page, 'temperature details');
+  await settle(page, 250);
   await page.screenshot({ path: 'artifacts/ui/support-temperature-panel.png' });
   await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
 
   await page.setViewportSize({ width: 560, height: 760 });
   await assertNoBodyOverflow(page, 'resized support window');
+  await settle(page, 250);
   await page.screenshot({ path: 'artifacts/ui/support-resized.png' });
 
   if (pageErrors.length) throw new Error(`Errores de página: ${pageErrors.join(' | ')}`);
