@@ -1,0 +1,304 @@
+name: Apply updater admin and performance fixes
+
+on:
+  push:
+    branches: [agent/fix-updater-admin-performance]
+    paths:
+      - '.github/workflows/agent-apply-updater-admin-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    env:
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-updater-admin-performance
+          fetch-depth: 0
+
+      - name: Probe configured backend
+        shell: bash
+        run: |
+          if [ -z "$VITE_SUPABASE_URL" ] || [ -z "$VITE_SUPABASE_ANON_KEY" ]; then
+            echo "NEXO_BACKEND=missing-secrets"
+            exit 0
+          fi
+          python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+          value = os.environ.get('VITE_SUPABASE_URL', '')
+          print('NEXO_BACKEND_HOST=' + (urlparse(value).hostname or 'invalid'))
+          PY
+          status=$(curl --silent --show-error --max-time 15 --output /dev/null --write-out '%{http_code}' "$VITE_SUPABASE_URL/auth/v1/health" || true)
+          echo "NEXO_BACKEND_HTTP=${status:-000}"
+
+      - name: Replace updater UI
+        shell: bash
+        run: |
+          cat > src/AppUpdater.tsx <<'EOF'
+          import { useCallback, useEffect, useRef, useState } from 'react';
+          import { Check, CircleAlert, RefreshCw, X } from 'lucide-react';
+          import { isTauriRuntime, safeInvoke } from './lib/tauri';
+
+          type AvailableUpdate = { version: string; notes?: string | null };
+          type UpdateState =
+            | { status: 'idle' }
+            | { status: 'checking' }
+            | { status: 'current' }
+            | { status: 'available'; update: AvailableUpdate }
+            | { status: 'installing'; update: AvailableUpdate }
+            | { status: 'error'; update?: AvailableUpdate; message: string };
+
+          type DismissedUpdate = { version: string; until: number };
+
+          const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
+          const MIN_EVENT_GAP_MS = 30 * 1000;
+          const SNOOZE_MS = 6 * 60 * 60 * 1000;
+
+          function UpdateMark({ size = 32 }: { size?: number }) {
+            const id = `update-x-${size}`;
+            return (
+              <svg width={size} height={size} viewBox="0 0 62 54" aria-hidden="true">
+                <defs><linearGradient id={id} x1="4" y1="4" x2="58" y2="50" gradientUnits="userSpaceOnUse"><stop stopColor="#765cff" /><stop offset=".55" stopColor="#5d61ea" /><stop offset="1" stopColor="#288bdf" /></linearGradient></defs>
+                <path d="M4 4h13.4L31 20.8 44.6 4H58L38.1 27 58 50H44.6L31 33.2 17.4 50H4l19.9-23z" fill={`url(#${id})`} />
+              </svg>
+            );
+          }
+
+          function readableError(error: unknown) {
+            const raw = error instanceof Error ? error.message : '';
+            if (/network|fetch|internet|connection|dns/i.test(raw)) return 'Sin conexión';
+            if (/signature|firma/i.test(raw)) return 'Firma inválida';
+            return 'No se pudo actualizar';
+          }
+
+          export default function AppUpdater() {
+            const [state, setState] = useState<UpdateState>({ status: 'idle' });
+            const started = useRef(false);
+            const installing = useRef(false);
+            const checking = useRef(false);
+            const dismissed = useRef<DismissedUpdate | null>(null);
+            const lastCheck = useRef(0);
+            const noticeTimer = useRef<number | null>(null);
+
+            const hideSoon = useCallback(() => {
+              if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+              noticeTimer.current = window.setTimeout(() => setState({ status: 'idle' }), 1800);
+            }, []);
+
+            const dismiss = useCallback((update?: AvailableUpdate) => {
+              if (update?.version) dismissed.current = { version: update.version, until: Date.now() + SNOOZE_MS };
+              setState({ status: 'idle' });
+            }, []);
+
+            const install = useCallback(async (update: AvailableUpdate) => {
+              if (installing.current) return;
+              installing.current = true;
+              setState({ status: 'installing', update });
+              try {
+                await safeInvoke('install_app_update');
+              } catch (error) {
+                installing.current = false;
+                setState({ status: 'error', update, message: readableError(error) });
+              }
+            }, []);
+
+            const check = useCallback(async (manual = false) => {
+              if (!isTauriRuntime() || installing.current || checking.current) return;
+              const now = Date.now();
+              if (!manual && now - lastCheck.current < MIN_EVENT_GAP_MS) return;
+              checking.current = true;
+              lastCheck.current = now;
+              if (manual) setState({ status: 'checking' });
+              try {
+                const update = await safeInvoke<AvailableUpdate | null>('check_app_update');
+                if (update) {
+                  const previous = dismissed.current;
+                  if (!manual && previous?.version === update.version && Date.now() < previous.until) return;
+                  setState({ status: 'available', update });
+                } else if (manual) {
+                  dismissed.current = null;
+                  setState({ status: 'current' });
+                  hideSoon();
+                }
+              } catch (error) {
+                if (manual) setState({ status: 'error', message: readableError(error) });
+              } finally {
+                checking.current = false;
+              }
+            }, [hideSoon]);
+
+            useEffect(() => {
+              if (!isTauriRuntime() || started.current) return;
+              started.current = true;
+              const first = window.setTimeout(() => void check(false), 8000);
+              const interval = window.setInterval(() => void check(false), CHECK_EVERY_MS);
+              const online = () => void check(false);
+              const manual = () => void check(true);
+              window.addEventListener('online', online);
+              window.addEventListener('nexo:check-update', manual);
+              window.addEventListener('nexo:check-update-passive', online);
+              return () => {
+                window.clearTimeout(first);
+                window.clearInterval(interval);
+                if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+                window.removeEventListener('online', online);
+                window.removeEventListener('nexo:check-update', manual);
+                window.removeEventListener('nexo:check-update-passive', online);
+              };
+            }, [check]);
+
+            if (state.status === 'idle') return null;
+
+            if (state.status === 'checking' || state.status === 'current') {
+              return (
+                <aside className={`app-update-toast ${state.status}`} role="status">
+                  {state.status === 'current' ? <Check size={15} /> : <RefreshCw className="spin" size={15} />}
+                  <b>{state.status === 'current' ? 'Al día' : 'Buscando'}</b>
+                </aside>
+              );
+            }
+
+            if (state.status === 'installing') {
+              return (
+                <aside className="app-update-installing" role="status" aria-label="Instalando actualización">
+                  <UpdateMark size={30} />
+                  <div className="app-update-track"><i /></div>
+                </aside>
+              );
+            }
+
+            const update = state.update;
+            const failed = state.status === 'error';
+            return (
+              <aside className={`app-update-panel ${failed ? 'error' : ''}`} role="dialog" aria-modal="false">
+                <button className="app-update-close" aria-label="Cerrar" onClick={() => dismiss(update)}><X size={14} /></button>
+                <span>{failed ? <CircleAlert size={19} /> : <UpdateMark size={30} />}</span>
+                <div><small>{failed ? state.message : `v${update?.version || ''}`}</small><b>{failed ? 'Reintentar' : 'Actualización lista'}</b></div>
+                <footer>
+                  <button onClick={() => dismiss(update)}>Después</button>
+                  <button onClick={() => update ? void install(update) : void check(true)}>{failed ? 'Probar' : 'Actualizar'}</button>
+                </footer>
+              </aside>
+            );
+          }
+          EOF
+
+          cat > src/updater.css <<'EOF'
+          .app-update-toast,.app-update-panel,.app-update-installing{position:fixed;z-index:400;right:14px;bottom:14px;color:#20222a;background:#fff;border:1px solid rgba(31,34,44,.14);box-shadow:0 14px 34px rgba(18,21,31,.18)}
+          .app-update-toast{height:38px;padding:0 12px;border-radius:11px;display:flex;align-items:center;gap:8px;color:#5952bd}.app-update-toast b{font-size:9.5px}.app-update-panel{width:278px;min-height:92px;padding:14px;border-radius:15px;display:grid;grid-template-columns:38px minmax(0,1fr);align-items:center;gap:10px}.app-update-panel>span{width:38px;height:38px;display:grid;place-items:center}.app-update-panel.error>span{border-radius:10px;color:#b34856;background:#fff0f2}.app-update-panel>div{display:grid;gap:3px}.app-update-panel small{color:#7d818b;font-size:8px;font-weight:800;letter-spacing:.08em}.app-update-panel b{font-size:12px}.app-update-close{position:absolute;right:7px;top:7px;width:25px;height:25px;border:0;border-radius:7px;display:grid;place-items:center;color:#8a8e97;background:transparent;cursor:pointer}.app-update-close:hover{background:#f0f1f3}.app-update-panel footer{grid-column:1/-1;display:grid;grid-template-columns:1fr 1.2fr;gap:7px}.app-update-panel footer button{height:34px;border:1px solid #daddE3;border-radius:9px;color:#60646e;background:#fff;font-size:9.5px;font-weight:750;cursor:pointer}.app-update-panel footer button:last-child{border-color:#5a51c7;color:#fff;background:#5a51c7}.app-update-installing{width:210px;height:64px;padding:12px;border-radius:14px;display:grid;grid-template-columns:36px minmax(0,1fr);align-items:center;gap:11px}.app-update-track{height:5px;border-radius:999px;overflow:hidden;background:#e8e7f4}.app-update-track i{display:block;width:42%;height:100%;border-radius:999px;background:#5a51c7;animation:update-track 1.05s ease-in-out infinite}.spin{animation:update-spin .8s linear infinite}@keyframes update-spin{to{transform:rotate(360deg)}}@keyframes update-track{0%{transform:translateX(-120%)}100%{transform:translateX(340%)}}@media(max-height:590px){.app-update-toast,.app-update-panel,.app-update-installing{bottom:10px;right:10px}}@media(prefers-reduced-motion:reduce){.spin,.app-update-track i{animation:none}.app-update-track i{width:100%}}
+          EOF
+
+      - name: Patch backend admin and performance
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'Pattern not found in {path}: {old[:80]}')
+              file.write_text(text.replace(old, new), encoding='utf-8')
+
+          replace('src-tauri/tauri.conf.json', '"windows": { "installMode": "passive" }', '"windows": { "installMode": "silent" }')
+
+          replace(
+              'src/AdminApp.tsx',
+              "import { useEffect, useMemo, useState } from 'react';",
+              "import { useEffect, useMemo, useRef, useState } from 'react';"
+          )
+          replace(
+              'src/AdminApp.tsx',
+              "const planName = (plan?: string | null) => plan === 'max' ? 'Max' : plan === 'pro' ? 'Pro' : 'Básico';",
+              "const planName = (plan?: string | null) => plan === 'max' ? 'Max' : plan === 'pro' ? 'Pro' : 'Básico';\n\nfunction adminError(reason: unknown) {\n  const raw = reason instanceof Error ? reason.message : '';\n  if (/failed to fetch|network|load failed|connection|timeout|abort/i.test(raw)) return 'No hay conexión con NEXO Control.';\n  return raw || 'No se pudo completar.';\n}"
+          )
+          replace(
+              'src/AdminApp.tsx',
+              "const [email, setEmail] = useState(backendConfig.backendKind === 'local' ? backendConfig.localAdminEmail : '');\n  const [password, setPassword] = useState(backendConfig.backendKind === 'local' ? backendConfig.localAdminPassword : '');",
+              "const [email, setEmail] = useState(appBackend.kind === 'local' ? backendConfig.localAdminEmail : '');\n  const [password, setPassword] = useState(appBackend.kind === 'local' ? backendConfig.localAdminPassword : '');"
+          )
+          replace(
+              'src/AdminApp.tsx',
+              "const [generatedCode, setGeneratedCode] = useState('');",
+              "const [generatedCode, setGeneratedCode] = useState('');\n  const refreshing = useRef(false);"
+          )
+          replace(
+              'src/AdminApp.tsx',
+              "  useEffect(() => {\n    if (!session) return;\n    const timer = window.setInterval(() => void refresh(true), 5000);\n    return () => window.clearInterval(timer);\n  }, [session]);",
+              "  useEffect(() => {\n    if (!session) return;\n    const poll = () => { if (document.visibilityState === 'visible') void refresh(true); };\n    const timer = window.setInterval(poll, 15000);\n    document.addEventListener('visibilitychange', poll);\n    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', poll); };\n  }, [session]);"
+          )
+          replace(
+              'src/AdminApp.tsx',
+              "  async function refresh(silent = false) {\n    if (!silent) setBusy('Actualizando');",
+              "  async function refresh(silent = false) {\n    if (refreshing.current) return;\n    refreshing.current = true;\n    if (!silent) setBusy('Actualizando');"
+          )
+          replace(
+              'src/AdminApp.tsx',
+              "      if (!silent) setError(reason instanceof Error ? reason.message : 'No se pudo cargar NEXO Control.');\n    } finally {\n      if (!silent) setBusy('');",
+              "      if (!silent) setError(adminError(reason));\n    } finally {\n      refreshing.current = false;\n      if (!silent) setBusy('');"
+          )
+          replace(
+              'src/AdminApp.tsx',
+              "      setError(reason instanceof Error ? reason.message : 'No se pudo iniciar sesión.');",
+              "      setError(adminError(reason));"
+          )
+
+          replace(
+              'src/SupportAppV6.tsx',
+              "    const timer = window.setTimeout(() => thread.current?.scrollTo({ top: thread.current.scrollHeight, behavior: 'smooth' }), 20);",
+              "    const timer = window.setTimeout(() => { if (thread.current) thread.current.scrollTop = thread.current.scrollHeight; }, 20);"
+          )
+          replace(
+              'src/SupportAppV6.tsx',
+              "  }, [messages, busy, pendingApproval, progress.percent, view]);",
+              "  }, [messages.length, busy, pendingApproval, view]);"
+          )
+
+          backend = Path('src/lib/backend.ts')
+          text = backend.read_text(encoding='utf-8')
+          text = text.replace(
+              "backendKind:u&&k?'supabase':import.meta.env.PROD?'supabase':'local'",
+              "backendKind:u&&k?'supabase':'local'"
+          )
+          old = "const req=async<T>(path:string,init?:RequestInit,token=anon)=>{const r=await fetch(base+path,{...init,headers:{apikey:anon,Authorization:`Bearer ${token}`,'Content-Type':'application/json',Prefer:'return=representation',...(init?.headers||{})}});if(!r.ok)throw Error((await r.text())||`Supabase ${r.status}`);const text=await r.text();return camel<T>(text?JSON.parse(text):null)},"
+          new = "const req=async<T>(path:string,init?:RequestInit,token=anon)=>{const controller=new AbortController(),timer=window.setTimeout(()=>controller.abort(),12000);try{const r=await fetch(base+path,{...init,signal:init?.signal||controller.signal,headers:{apikey:anon,Authorization:`Bearer ${token}`,'Content-Type':'application/json',Prefer:'return=representation',...(init?.headers||{})}});if(!r.ok)throw Error((await r.text())||`Supabase ${r.status}`);const text=await r.text();return camel<T>(text?JSON.parse(text):null)}catch(error){if(error instanceof Error&&/abort|failed to fetch|network|load failed/i.test(error.message))throw Error('No hay conexión con NEXO Control.');throw error}finally{window.clearTimeout(timer)}},"
+          if old not in text:
+              raise SystemExit('Backend request pattern not found')
+          backend.write_text(text.replace(old, new), encoding='utf-8')
+
+          contracts = Path('scripts/verify-product-contracts.mjs')
+          text = contracts.read_text(encoding='utf-8')
+          text = text.replace(
+              "requireMatch(updater, /const CHECK_EVERY_MS = 60 \\* 1000/, 'NEXO debe buscar actualizaciones sin reiniciar.');\nrequireMatch(updater, /Actualizando NEXO/, 'La actualización debe tener una etapa visual propia.');\nrequireMatch(updater, /Math\\.round\\(progress\\)/, 'El actualizador debe mostrar progreso.');\nrequireMatch(updaterCss, /\\.app-update-stage/, 'Falta la escena visual de actualización.');",
+              "requireMatch(updater, /const CHECK_EVERY_MS = 6 \\* 60 \\* 60 \\* 1000/, 'NEXO debe revisar actualizaciones sin consultar cada minuto.');\nrequireMatch(updater, /app-update-installing/, 'La actualización debe tener una etapa visual propia.');\nforbidMatch(updater, /progressTimer|setProgress\\(/, 'El actualizador no debe simular progreso con renders constantes.');\nrequireMatch(updaterCss, /\\.app-update-installing/, 'Falta el indicador compacto de actualización.');\nforbidMatch(updaterCss, /backdrop-filter/, 'El actualizador no debe aplicar blur de pantalla completa.');"
+          )
+          contracts.write_text(text, encoding='utf-8')
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validate patch
+        run: |
+          npm ci
+          npm run build
+          node scripts/verify-product-contracts.mjs
+
+      - name: Commit patched branch
+        shell: bash
+        run: |
+          rm .github/workflows/agent-apply-updater-admin-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix updater admin connectivity and UI performance"
+          git push origin HEAD:agent/fix-updater-admin-performance
