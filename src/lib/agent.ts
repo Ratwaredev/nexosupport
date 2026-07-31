@@ -32,6 +32,16 @@ export async function getAgentStatus(): Promise<AgentStatus> {
 }
 
 function previewPayload(actionId: string) {
+  if (actionId === 'disk_health') return {
+    generatedAt: new Date().toISOString(),
+    disks: [{
+      friendlyName: 'NVMe de prueba', mediaType: 'SSD', busType: 'NVMe', healthStatus: 'Healthy',
+      operationalStatus: ['OK'], sizeGb: 476.9, temperature: 42, wear: 2,
+      readErrorsTotal: 0, writeErrorsTotal: 0, powerOnHours: 1820
+    }],
+    failurePredicted: false,
+    source: 'Windows Storage Management'
+  };
   if (actionId === 'network_check') return { adapter: { Name: 'Ethernet', InterfaceDescription: 'Adaptador de prueba', LinkSpeed: '1 Gbps' }, gateway: '192.168.1.1', dns: true, internet: true };
   if (actionId === 'defender_status') return { service: true, antivirus: true, realtime: true, quickScanAge: 1, fullScanAge: 14 };
   if (actionId === 'startup_review') return { count: 6, items: [{ Name: 'OneDrive' }, { Name: 'Steam' }, { Name: 'Discord' }, { Name: 'Audio service' }, { Name: 'Update service' }, { Name: 'Security tray' }] };
@@ -48,7 +58,10 @@ function previewPayload(actionId: string) {
 }
 
 export async function runAgentAction(actionId: string): Promise<AgentActionResult> {
-  if (isTauriRuntime()) return safeInvoke<AgentActionResult>('run_agent_action', { actionId });
+  if (isTauriRuntime()) {
+    if (actionId === 'disk_health') return safeInvoke<AgentActionResult>('read_disk_health');
+    return safeInvoke<AgentActionResult>('run_agent_action', { actionId });
+  }
   await wait(420);
   return { action: actionId, ok: true, message: 'Listo.', details: [JSON.stringify(previewPayload(actionId))] };
 }
