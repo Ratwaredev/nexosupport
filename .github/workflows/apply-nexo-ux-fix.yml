@@ -1,0 +1,32 @@
+name: Apply NEXO UX fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/nexo-ux-fix.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patch
+        run: python .github/scripts/apply_nexo_ux_fix.py
+      - name: Validate frontend
+        shell: bash
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm run build
+      - name: Commit fixes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/AppUpdater.tsx src/updater.css src/AdminApp.tsx src/SupportAppV6.tsx src/lib/backend.ts
+          git commit -m "Fix updater animation, admin load and RustDesk consent"
+          git push
