@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { appBackend, backendConfig } from './lib/backend';
 import type { AdminDashboard, AppSession, DeviceEntitlementRecord, DeviceRecord, SupportUserRecord, TicketRecord } from './lib/domain';
+import { STORAGE_KEYS } from './lib/domain';
 import { diagnosticDelta, isSupportRunPayload } from './lib/support-run';
 import type { SupportRunReport } from './lib/support-run';
 import { isTauriRuntime, safeInvoke } from './lib/tauri';
@@ -73,19 +74,13 @@ export default function AdminApp() {
   const refreshing = useRef(false);
 
   useEffect(() => {
-    void appBackend.bootstrap('admin').then(async (restored) => {
-      setSession(restored);
-      if (restored) await refresh();
-    }).catch(() => setSession(null));
+    const clearAdminSession = () => localStorage.removeItem(STORAGE_KEYS.adminSession);
+    clearAdminSession();
+    setSession(null);
+    setDashboard(null);
+    window.addEventListener('beforeunload', clearAdminSession);
+    return () => window.removeEventListener('beforeunload', clearAdminSession);
   }, []);
-
-  useEffect(() => {
-    if (!session) return;
-    const poll = () => { if (document.visibilityState === 'visible') void refresh(true); };
-    const timer = window.setInterval(poll, 15000);
-    document.addEventListener('visibilitychange', poll);
-    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', poll); };
-  }, [session]);
 
   const users = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -230,6 +225,7 @@ export default function AdminApp() {
   }
 
   async function connectRemote(remoteId: string) {
+    if (isTauriRuntime() && !window.confirm(`¿Abrir RustDesk y conectarse al equipo ${remoteId}?`)) return;
     try {
       if (isTauriRuntime()) await safeInvoke('managed_connect_remote_tool', { remoteId });
       else await navigator.clipboard?.writeText(remoteId);
@@ -240,7 +236,12 @@ export default function AdminApp() {
   }
 
   const showSupport = () => isTauriRuntime() ? safeInvoke('show_main_window') : Promise.resolve();
-  const closeAdmin = () => isTauriRuntime() ? safeInvoke('close_admin_window') : Promise.resolve();
+  const closeAdmin = async () => {
+    localStorage.removeItem(STORAGE_KEYS.adminSession);
+    setSession(null);
+    setDashboard(null);
+    if (isTauriRuntime()) await safeInvoke('close_admin_window');
+  };
 
   if (!session) {
     return (

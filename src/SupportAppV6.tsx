@@ -445,8 +445,7 @@ export default function SupportAppV6() {
     }, session.deviceToken);
     const remoteSession = await appBackend.createRemoteSession({ deviceId: device.id, ticketId: ticket.id }, session.deviceToken);
     setSupportCode(remoteSession.code);
-    await openRemoteTool();
-    return result('remote_support', true, 'Solicitud enviada.', [{
+    return result('remote_support', true, 'Solicitud enviada. RustDesk no se abrirá hasta que lo autorices.', [{
       ticketId: ticket.id,
       rustdeskId: status.id || null,
       requestCode: remoteSession.code,
@@ -738,7 +737,11 @@ export default function SupportAppV6() {
             </section>
             <footer>
               <button className="secondary" onClick={() => void analyzeSelected()} disabled={Boolean(busy)}>Revisar</button>
-              <button onClick={() => void (remote?.installed ? startRemote().then(() => setNotice({ tone: 'success', text: 'Solicitud enviada.' })) : installRemote())} disabled={Boolean(busy)}>{remote?.installed ? 'Pedir soporte' : 'Instalar RustDesk'}</button>
+              {supportCode ? (
+                <button onClick={() => void openRemoteTool().then(() => setNotice({ tone: 'success', text: 'RustDesk abierto.' })).catch((error) => setNotice({ tone: 'error', text: errorText(error) }))} disabled={Boolean(busy)}>Abrir RustDesk</button>
+              ) : (
+                <button onClick={() => void (remote?.installed ? startRemote().then(() => setNotice({ tone: 'success', text: 'Solicitud enviada. RustDesk sigue cerrado.' })) : installRemote())} disabled={Boolean(busy)}>{remote?.installed ? 'Pedir soporte' : 'Instalar RustDesk'}</button>
+              )}
             </footer>
           </>
         ) : (

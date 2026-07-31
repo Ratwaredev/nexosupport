@@ -130,8 +130,7 @@ export default function AppUpdater() {
   if (state.status === 'installing') {
     return (
       <aside className="app-update-installing" role="status" aria-label="Instalando actualización">
-        <UpdateMark size={30} />
-        <div className="app-update-track"><i /></div>
+        <span className="app-update-orb" aria-hidden="true"><i /></span>
       </aside>
     );
   }
