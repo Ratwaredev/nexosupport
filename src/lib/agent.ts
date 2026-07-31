@@ -60,7 +60,8 @@ function previewPayload(actionId: string) {
 export async function runAgentAction(actionId: string): Promise<AgentActionResult> {
   if (isTauriRuntime()) {
     if (actionId === 'disk_health') return safeInvoke<AgentActionResult>('read_disk_health');
-    return safeInvoke<AgentActionResult>('run_agent_action', { actionId });
+    const nativeActionId = actionId === 'open_windows_update' ? 'windows_update' : actionId;
+    return safeInvoke<AgentActionResult>('run_agent_action', { actionId: nativeActionId });
   }
   await wait(420);
   return { action: actionId, ok: true, message: 'Listo.', details: [JSON.stringify(previewPayload(actionId))] };
