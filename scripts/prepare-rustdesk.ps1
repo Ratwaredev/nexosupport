@@ -1,7 +1,7 @@
 param(
   [string]$Version = '1.4.9',
   [string]$ReleaseTag = '1.4.9',
-  [string]$Sha256 = '4cd9af0d822891f2676088e11c869d4a75d956ee7af50797092986b6d4878f85'
+  [string]$Sha256 = 'eaedeb0088e687bf46f7c46a9c6ea5493ce51f3134dfd6acbedb47b5b9136274'
 )
 
 $ErrorActionPreference = 'Stop'
