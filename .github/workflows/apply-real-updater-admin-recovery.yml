@@ -31,7 +31,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Apply patch
+      - name: Apply definitive patch
         run: python .github/scripts/apply-real-updater-admin-recovery.py
 
       - name: Install dependencies
