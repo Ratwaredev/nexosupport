@@ -20,6 +20,7 @@ pub fn run() {
         return;
     }
     updates::register_current_install(current_version);
+    updates::repair_stale_launchers(current_version);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
