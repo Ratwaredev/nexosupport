@@ -1,80 +1,66 @@
 # NEXO Support
 
-NEXO Support es un asistente de escritorio para Windows que vive en la bandeja del sistema. El usuario abre un popup compacto, explica el problema y autoriza de forma explícita qué puede leer o modificar.
+Asistente de soporte para Windows. Vive en la bandeja, diagnostica con herramientas cerradas, pide permiso antes de modificar el equipo y guarda un reporte verificable en NEXO Control.
 
-## Producto
+## Flujo
 
-La aplicación tiene dos superficies separadas:
+1. El administrador crea un usuario y genera un código de 30 minutos.
+2. La persona instala NEXO y conecta la PC con ese código.
+3. Elige **Agente** o **Solo herramientas**.
+4. El agente revisa el equipo usando únicamente el catálogo permitido.
+5. Toda modificación y toda solicitud remota requieren autorización visible.
+6. NEXO repite el diagnóstico y envía el resultado a Control.
 
-- **NEXO Support:** popup para el usuario final, con estado del equipo, chat, diagnóstico y soporte remoto.
-- **NEXO Control:** panel administrativo para gestionar usuarios, equipos, planes, modelos, consumo y solicitudes.
+## Superficies
 
-Las sesiones son independientes. Una persona del equipo NEXO puede usar su propio asistente como usuario normal y abrir el panel administrativo sin cerrar ni reemplazar la sesión de su PC.
+- **NEXO Support:** popup para la persona que necesita ayuda.
+- **NEXO Control:** usuarios, equipos, planes, solicitudes remotas y reportes antes/después.
 
-## Privacidad y permisos
+Las sesiones de usuario y administrador son independientes.
 
-En la primera activación el usuario decide si permite:
+## Seguridad
 
-- usar el asistente conectado al servidor de NEXO;
-- leer memoria, disco y sensores de hardware;
-- compartir un resumen técnico con NEXO y el modelo asignado;
-- ejecutar revisiones automáticas mientras la aplicación está activa.
+- La clave de OpenRouter vive en una Supabase Edge Function, nunca en el EXE.
+- El modelo no ejecuta texto, PowerShell ni comandos inventados.
+- Solo puede elegir una herramienta permitida por turno.
+- Las lecturas no modifican Windows.
+- Limpiar temporales, reparar DNS, iniciar Defender, abrir Windows Update y pedir soporte remoto requieren confirmación.
+- El modo **Solo herramientas** no comparte diagnósticos.
+- Los reportes registran acción, resultado y evidencia anterior/posterior.
+- Una sesión remota solo puede crearse para un ticket de la misma PC.
+- RustDesk se abre con aceptación visible; NEXO no configura acceso desatendido.
 
-La lectura local de sensores no se comparte si el usuario no habilita **Compartir diagnóstico con NEXO**. Las acciones que cambian Windows requieren una confirmación adicional y visible.
+## Catálogo
 
-## Sensores de hardware
-
-La aplicación usa `LibreHardwareMonitorLib` 0.9.6 para leer los sensores que el firmware, la placa y los controladores exponen a Windows:
-
-- temperatura y carga de CPU;
-- temperatura y carga de GPU;
-- temperatura de discos;
-- ventiladores y otros sensores compatibles.
-
-No se presenta una zona ACPI genérica como si fuera la temperatura exacta del procesador. Si el sensor necesita privilegios elevados, el usuario puede iniciar una lectura avanzada y Windows muestra su diálogo de autorización.
-
-El componente se descarga desde el paquete oficial de NuGet durante la preparación del build y se distribuye con su licencia MPL-2.0.
-
-## IA y planes
-
-La clave de OpenRouter nunca se guarda en el ejecutable. El desktop llama a `api/assistant.ts`, que:
-
-1. valida el dispositivo;
-2. verifica el consentimiento y el plan;
-3. aplica el límite mensual;
-4. selecciona el modelo asignado al usuario o equipo;
-5. filtra las herramientas permitidas antes de llamar a OpenRouter.
-
-NEXO Control permite cambiar el plan, el modelo y el límite de cada usuario o equipo sin pedirle configuración al cliente.
-
-## Herramientas
-
-### Solo lectura
+### Lectura
 
 - diagnóstico general;
 - sensores de hardware;
 - conexión y DNS;
-- archivos temporales;
+- temporales recuperables;
 - programas de inicio;
-- estado de Microsoft Defender.
+- Microsoft Defender.
 
-### Con confirmación
+### Con autorización
 
-- limpiar temporales antiguos;
+- limpiar temporales antiguos permitidos;
 - limpiar caché DNS;
 - iniciar un análisis rápido de Defender;
 - abrir Windows Update;
-- preparar soporte remoto.
+- preparar soporte remoto con RustDesk.
 
-No existe una herramienta de comandos arbitrarios.
+## Sensores
+
+NEXO distribuye `LibreHardwareMonitorLib` 0.9.6 con licencia MPL-2.0. Solo muestra temperaturas válidas que el firmware y los controladores exponen a Windows; una lectura ACPI genérica no se presenta como temperatura exacta de CPU.
 
 ## Configuración
 
 1. Ejecutar `infra/supabase/schema.sql`.
 2. Ejecutar `infra/supabase/nexo-assistant.sql`.
-3. Copiar `.env.example` y `.env.server.example`.
-4. Configurar Supabase y las variables server-only de OpenRouter.
-5. Crear usuarios desde NEXO Control y generar un código de activación para cada uno.
+3. Ejecutar `infra/supabase/secure-agent.sql`.
+4. Configurar las variables públicas de `.env.example`.
+5. Configurar los secretos de `.env.server.example` y GitHub Actions.
+6. Desplegar `nexo-assistant` o fusionar a `main` para usar el workflow automático.
 
 ## Desarrollo
 
@@ -90,4 +76,4 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
-GitHub Actions valida TypeScript y Rust en Windows y genera un instalador NSIS sin firma como artefacto de prueba. Las releases públicas deben construirse con la clave privada real del updater y publicar el instalador, su firma y `latest.json`.
+GitHub Actions valida TypeScript, contratos de seguridad, navegación con Playwright, Rust, el instalador NSIS y los recursos instalados. Las releases públicas publican el instalador firmado y `latest.json` para el updater.
