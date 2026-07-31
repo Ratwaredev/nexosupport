@@ -21,8 +21,131 @@ async function assertNoBodyOverflow(page, label) {
   }
 }
 
+async function installSupabaseSmokeBackend(context) {
+  const now = new Date().toISOString();
+  const device = {
+    id: 'dev-smoke',
+    org_name: 'NEXO',
+    support_user_id: 'usr-smoke',
+    display_name: 'PC de prueba',
+    computer_name: 'NEXO-SMOKE',
+    user_name: 'smoke',
+    os: 'Windows 11 Pro',
+    platform: 'windows',
+    pairing_code: 'DEMO-PAIR',
+    device_token: 'tok-smoke',
+    status: 'idle',
+    last_seen_at: now,
+    created_at: now,
+    updated_at: now
+  };
+  const consent = {
+    device_id: device.id,
+    assistant_enabled: true,
+    share_diagnostics: true,
+    automatic_checks: false,
+    hardware_sensors: true,
+    elevated_sensors: false,
+    updated_at: now
+  };
+  const entitlement = {
+    device_id: device.id,
+    status: 'active',
+    plan: 'pro',
+    model: null,
+    monthly_message_limit: 1000,
+    messages_used: 0,
+    period_start: now,
+    created_at: now,
+    updated_at: now
+  };
+
+  await context.route('**/rest/v1/**', async (route) => {
+    const request = route.request();
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-headers': '*',
+          'access-control-allow-methods': 'GET,POST,PATCH,OPTIONS'
+        }
+      });
+      return;
+    }
+
+    const pathname = new URL(request.url()).pathname;
+    let payload = [];
+
+    if (pathname.endsWith('/rpc/register_device')) {
+      payload = {
+        session: {
+          device_id: device.id,
+          device_token: device.device_token,
+          display_name: device.display_name,
+          org_name: device.org_name
+        },
+        device
+      };
+    } else if (pathname.endsWith('/rpc/get_client_dashboard')) {
+      payload = {
+        device,
+        consent,
+        entitlement,
+        tickets: [],
+        diagnostics: [],
+        latest_release: null,
+        latest_session: null
+      };
+    } else if (pathname.endsWith('/rpc/save_diagnostic')) {
+      payload = {
+        id: 'diag-smoke',
+        device_id: device.id,
+        generated_at: new Date().toISOString(),
+        payload: {}
+      };
+    } else if (pathname.endsWith('/rpc/set_device_consents')) {
+      payload = consent;
+    } else if (pathname.endsWith('/rpc/create_ticket')) {
+      payload = {
+        id: 'NX-SMOKE',
+        device_id: device.id,
+        client_name: 'PC de prueba',
+        issue: 'Soporte remoto · RustDesk 123 456 789',
+        status: 'nuevo',
+        priority: 'normal',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+    } else if (pathname.endsWith('/rpc/create_remote_session')) {
+      payload = {
+        id: 'ses-smoke',
+        ticket_id: 'NX-SMOKE',
+        device_id: device.id,
+        code: 'NX-SMOKE',
+        expires_in_minutes: 20,
+        instructions: 'Sesión de prueba.',
+        created_at: new Date().toISOString()
+      };
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: {
+        'access-control-allow-origin': '*',
+        'access-control-allow-headers': '*',
+        'access-control-allow-methods': 'GET,POST,PATCH,OPTIONS'
+      },
+      body: JSON.stringify(payload)
+    });
+  });
+}
+
 try {
   const context = await browser.newContext({ viewport: { width: 460, height: 680 }, deviceScaleFactor: 1 });
+  await installSupabaseSmokeBackend(context);
+
   const page = await context.newPage();
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
