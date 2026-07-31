@@ -52,6 +52,8 @@ async function installSmokeBackend(context) {
     let message;
     if (last?.role === 'user') {
       message = { role: 'assistant', content: null, tool_calls: [{ id: 'call-diagnostic-1', type: 'function', function: { name: 'run_quick_diagnostic', arguments: '{}' } }] };
+    } else if (!toolNames.includes('disk_health')) {
+      message = { role: 'assistant', content: null, tool_calls: [{ id: 'call-disk-health', type: 'function', function: { name: 'disk_health', arguments: '{}' } }] };
     } else if (!toolNames.includes('scan_temp_files')) {
       message = { role: 'assistant', content: null, tool_calls: [{ id: 'call-scan', type: 'function', function: { name: 'scan_temp_files', arguments: '{}' } }] };
     } else if (!toolNames.includes('clean_temp_files')) {
@@ -128,7 +130,9 @@ try {
   await page.screenshot({ path: 'artifacts/ui/support-agent-progress.png' });
   await waitText(page, 'Liberé espacio y verifiqué el equipo.');
   await waitText(page, 'Reporte enviado');
-  if (!state.diagnostics.some((item) => item.payload?.kind === 'nexo-support-run')) throw new Error('Agent report was not saved.');
+  const report = state.diagnostics.find((item) => item.payload?.kind === 'nexo-support-run');
+  if (!report) throw new Error('Agent report was not saved.');
+  if (!report.payload.actions.some((action) => action.tool === 'disk_health')) throw new Error('Disk health evidence was not recorded.');
   await page.screenshot({ path: 'artifacts/ui/support-agent-done.png' });
 
   await page.getByRole('button', { name: 'Herramientas', exact: true }).click();
@@ -167,7 +171,7 @@ try {
   await admin.screenshot({ path: 'artifacts/ui/admin-login.png' });
   await assertNoBodyOverflow(admin, 'admin');
 
-  console.log('NEXO UI smoke passed: explicit consent, OpenRouter tool loop, visible approval, one-rocket optimization, report persistence and remote support.');
+  console.log('NEXO UI smoke passed: explicit consent, disk health, OpenRouter tool loop, visible approval, one-rocket optimization, report persistence and remote support.');
   await context.close();
 } finally {
   await browser.close();
