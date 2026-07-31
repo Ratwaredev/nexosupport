@@ -1,11 +1,11 @@
 {
-  "version": "0.4.82",
+  "version": "0.4.83",
   "status": "cancelled",
-  "runId": "30664676740",
-  "commit": "b017e4135e22c4a1334686d66e2f27320036cc91",
+  "runId": "30664785293",
+  "commit": "fc938eedabde86d1f6af1eb6f83b5e87ecc117c3",
   "releaseUrl": null,
   "updaterPlatform": null,
   "updaterProbe": null,
   "runtimeMode": "connected",
-  "recordedAt": "2026-07-31T20:56:46.267Z"
+  "recordedAt": "2026-07-31T20:59:26.345Z"
 }
