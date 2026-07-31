@@ -6,8 +6,10 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  ClipboardCheck,
   Copy,
   Cpu,
+  ExternalLink,
   Headphones,
   Laptop,
   LogOut,
@@ -22,8 +24,11 @@ import {
 } from 'lucide-react';
 import { appBackend, backendConfig } from './lib/backend';
 import type { AdminDashboard, AppSession, DeviceEntitlementRecord, DeviceRecord, SupportUserRecord, TicketRecord } from './lib/domain';
+import { diagnosticDelta, isSupportRunPayload } from './lib/support-run';
+import type { SupportRunReport } from './lib/support-run';
 import { isTauriRuntime, safeInvoke } from './lib/tauri';
 import './admin.css';
+import './admin-agent.css';
 
 type View = 'users' | 'devices' | 'requests';
 type UserDraft = { fullName: string; email: string; plan: string; limit: string; isStaff: boolean };
@@ -70,6 +75,12 @@ export default function AdminApp() {
     }).catch(() => setSession(null));
   }, []);
 
+  useEffect(() => {
+    if (!session) return;
+    const timer = window.setInterval(() => void refresh(true), 5000);
+    return () => window.clearInterval(timer);
+  }, [session]);
+
   const users = useMemo(() => {
     const term = query.trim().toLowerCase();
     const all = dashboard?.users ?? [];
@@ -86,23 +97,28 @@ export default function AdminApp() {
     [dashboard?.devices, selectedUser]
   );
 
+  const reportsCount = useMemo(
+    () => dashboard?.diagnostics.filter((item) => isSupportRunPayload(item.payload)).length ?? 0,
+    [dashboard?.diagnostics]
+  );
+
   const stats = useMemo(() => ({
     activeUsers: dashboard?.users.filter((user) => user.status === 'active').length ?? 0,
     protectedDevices: dashboard?.entitlements.filter((item) => item.status === 'active').length ?? 0,
     openRequests: dashboard?.tickets.filter((ticket) => ticket.status !== 'cerrado').length ?? 0
   }), [dashboard]);
 
-  async function refresh() {
-    setBusy('Actualizando');
+  async function refresh(silent = false) {
+    if (!silent) setBusy('Actualizando');
     try {
       const data = await appBackend.getAdminDashboard();
       setDashboard(data);
       setSelectedUserId((current) => current || data.users[0]?.id || '');
       setError('');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'No pude cargar NEXO Control.');
+      if (!silent) setError(reason instanceof Error ? reason.message : 'No pude cargar NEXO Control.');
     } finally {
-      setBusy('');
+      if (!silent) setBusy('');
     }
   }
 
@@ -148,7 +164,7 @@ export default function AdminApp() {
       setDraft(emptyDraft);
       setShowAdvanced(false);
       setShowCreate(false);
-      setNotice(`Usuario creado. Código ${pairing.code} copiado.`);
+      setNotice(`Código ${pairing.code} copiado.`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'No pude crear el usuario.');
     } finally {
@@ -162,7 +178,7 @@ export default function AdminApp() {
     try {
       await appBackend.updateSupportUser(selectedUser.id, patch);
       await refresh();
-      setNotice('Cambios guardados.');
+      setNotice('Guardado.');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'No pude guardar los cambios.');
     } finally {
@@ -205,6 +221,16 @@ export default function AdminApp() {
     }
   }
 
+  async function connectRemote(remoteId: string) {
+    try {
+      if (isTauriRuntime()) await safeInvoke('managed_connect_remote_tool', { remoteId });
+      else await navigator.clipboard?.writeText(remoteId);
+      setNotice(isTauriRuntime() ? 'RustDesk abierto.' : 'ID copiado.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No pude abrir RustDesk.');
+    }
+  }
+
   const showAssistant = () => isTauriRuntime() ? safeInvoke('show_main_window') : Promise.resolve();
   const closeAdmin = () => isTauriRuntime() ? safeInvoke('close_admin_window') : Promise.resolve();
 
@@ -213,7 +239,7 @@ export default function AdminApp() {
       <main className="admin-login">
         <section className="login-card">
           <div className="login-brand"><NexoMark size={32} /><span><b>NEXO</b><small>Control</small></span></div>
-          <div className="login-copy"><h1>Administración</h1><p>Gestioná personas, equipos y solicitudes.</p></div>
+          <div className="login-copy"><h1>Administración</h1><p>Usuarios, equipos y soporte.</p></div>
           <form onSubmit={login}>
             <label><span>Correo</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" /></label>
             <label><span>Contraseña</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>
@@ -233,17 +259,17 @@ export default function AdminApp() {
         <nav>
           <button className={view === 'users' ? 'active' : ''} onClick={() => setView('users')}><UsersRound size={18} /><span>Usuarios</span><b>{dashboard?.users.length ?? 0}</b></button>
           <button className={view === 'devices' ? 'active' : ''} onClick={() => setView('devices')}><Laptop size={18} /><span>Equipos</span><b>{dashboard?.devices.length ?? 0}</b></button>
-          <button className={view === 'requests' ? 'active' : ''} onClick={() => setView('requests')}><Headphones size={18} /><span>Solicitudes</span><b>{stats.openRequests}</b></button>
+          <button className={view === 'requests' ? 'active' : ''} onClick={() => setView('requests')}><Headphones size={18} /><span>Soporte</span><b>{stats.openRequests + reportsCount}</b></button>
         </nav>
         <div className="sidebar-bottom">
-          <button onClick={() => void showAssistant()}><ArrowUpRight size={17} /> Abrir mi asistente</button>
+          <button onClick={() => void showAssistant()}><ArrowUpRight size={17} /> Abrir asistente</button>
           <button onClick={() => void logout()}><LogOut size={17} /> Cerrar sesión</button>
         </div>
       </aside>
 
       <section className="admin-main">
         <header className="admin-header">
-          <div><span>NEXO Support</span><h1>{view === 'users' ? 'Usuarios' : view === 'devices' ? 'Equipos' : 'Solicitudes'}</h1></div>
+          <div><span>NEXO Support</span><h1>{view === 'users' ? 'Usuarios' : view === 'devices' ? 'Equipos' : 'Soporte'}</h1></div>
           <div className="admin-header-actions">
             <button className="icon" aria-label="Actualizar" onClick={() => void refresh()}><RefreshCw className={busy ? 'spin' : ''} size={17} /></button>
             {view === 'users' && <button className="primary" onClick={() => setShowCreate(true)}><Plus size={17} /> Nuevo usuario</button>}
@@ -252,7 +278,7 @@ export default function AdminApp() {
 
         <div className="summary-strip">
           <span><b>{stats.activeUsers}</b><small>usuarios activos</small></span>
-          <span><b>{stats.protectedDevices}</b><small>equipos protegidos</small></span>
+          <span><b>{stats.protectedDevices}</b><small>equipos conectados</small></span>
           <span className={stats.openRequests ? 'attention' : ''}><b>{stats.openRequests}</b><small>solicitudes abiertas</small></span>
         </div>
 
@@ -266,7 +292,7 @@ export default function AdminApp() {
         {view === 'users' && (
           <div className="users-layout">
             <section className="users-list panel">
-              <div className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por nombre o correo" /></div>
+              <div className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar" /></div>
               <div className="list-scroll">
                 {users.map((user) => {
                   const count = (dashboard?.devices ?? []).filter((device) => device.supportUserId === user.id).length;
@@ -279,7 +305,7 @@ export default function AdminApp() {
                     </button>
                   );
                 })}
-                {users.length === 0 && <div className="list-empty"><Search size={22} /><span>No encontré usuarios.</span></div>}
+                {users.length === 0 && <div className="list-empty"><Search size={22} /><span>Sin resultados.</span></div>}
               </div>
             </section>
 
@@ -288,40 +314,40 @@ export default function AdminApp() {
                 <>
                   <div className="detail-title">
                     <span className="detail-avatar"><UserRound size={22} /></span>
-                    <div><h2>{selectedUser.fullName}</h2><p>{selectedUser.email || 'Sin correo cargado'}{selectedUser.isStaff ? ' · Equipo NEXO' : ''}</p></div>
+                    <div><h2>{selectedUser.fullName}</h2><p>{selectedUser.email || 'Sin correo'}{selectedUser.isStaff ? ' · Equipo NEXO' : ''}</p></div>
                     <span className={`state ${selectedUser.status}`}>{selectedUser.status === 'active' ? 'Activo' : 'Suspendido'}</span>
                   </div>
 
                   {generatedCode && (
                     <button className="code-card" onClick={() => void copyCode()}>
-                      <span><small>Código de activación</small><b>{generatedCode}</b><p>Vence en 30 minutos.</p></span>
+                      <span><small>Código</small><b>{generatedCode}</b><p>30 minutos.</p></span>
                       <i><Copy size={17} /> Copiar</i>
                     </button>
                   )}
 
                   <div className="access-section">
-                    <div className="section-heading"><div><span>Acceso</span><p>Plan y uso mensual de este usuario.</p></div></div>
+                    <div className="section-heading"><div><span>Acceso</span></div></div>
                     <div className="detail-grid">
                       <label><span>Plan</span><select value={selectedUser.defaultPlan} onChange={(event) => void updateUser({ defaultPlan: event.target.value })}><option value="basic">Básico</option><option value="pro">Pro</option><option value="max">Max</option></select></label>
                       <label><span>Límite mensual</span><input key={`${selectedUser.id}-limit`} type="number" defaultValue={selectedUser.monthlyMessageLimit ?? ''} placeholder="Sin límite" onBlur={(event) => void updateUser({ monthlyMessageLimit: event.target.value ? Number(event.target.value) : null })} /></label>
                     </div>
-                    <button className="advanced-toggle" onClick={() => setShowAdvanced((value) => !value)}><SlidersHorizontal size={15} /> Configuración avanzada <ChevronDown className={showAdvanced ? 'open' : ''} size={15} /></button>
+                    <button className="advanced-toggle" onClick={() => setShowAdvanced((value) => !value)}><SlidersHorizontal size={15} /> Avanzado <ChevronDown className={showAdvanced ? 'open' : ''} size={15} /></button>
                     {showAdvanced && (
                       <div className="advanced-panel">
-                        <label><span>Modelo específico <small>opcional</small></span><input key={`${selectedUser.id}-model`} defaultValue={selectedUser.defaultModel ?? ''} placeholder="Usar el modelo del plan" onBlur={(event) => void updateUser({ defaultModel: event.target.value || null })} /></label>
-                        <p>Dejalo vacío para usar el modelo configurado para el plan {planName(selectedUser.defaultPlan)}.</p>
+                        <label><span>Modelo <small>opcional</small></span><input key={`${selectedUser.id}-model`} defaultValue={selectedUser.defaultModel ?? ''} placeholder="Modelo del plan" onBlur={(event) => void updateUser({ defaultModel: event.target.value || null })} /></label>
+                        <p>Vacío usa {planName(selectedUser.defaultPlan)}.</p>
                       </div>
                     )}
                   </div>
 
                   <div className="user-actions">
                     <button className="primary" onClick={() => void generateCode()}><Copy size={17} /> Generar código</button>
-                    <button onClick={() => void updateUser({ status: selectedUser.status === 'active' ? 'suspended' : 'active' })}>{selectedUser.status === 'active' ? 'Suspender acceso' : 'Reactivar acceso'}</button>
+                    <button onClick={() => void updateUser({ status: selectedUser.status === 'active' ? 'suspended' : 'active' })}>{selectedUser.status === 'active' ? 'Suspender' : 'Reactivar'}</button>
                   </div>
 
-                  <div className="section-title"><span>Equipos vinculados</span><b>{userDevices.length}</b></div>
+                  <div className="section-title"><span>Equipos</span><b>{userDevices.length}</b></div>
                   <div className="compact-devices">
-                    {userDevices.length === 0 && <div className="empty-device"><Laptop size={20} /><span>Todavía no vinculó ningún equipo.</span></div>}
+                    {userDevices.length === 0 && <div className="empty-device"><Laptop size={20} /><span>Sin equipos.</span></div>}
                     {userDevices.map((device) => {
                       const entitlement = dashboard?.entitlements.find((item) => item.deviceId === device.id);
                       return (
@@ -341,21 +367,21 @@ export default function AdminApp() {
         )}
 
         {view === 'devices' && <DevicesView dashboard={dashboard} onUpdate={updateEntitlement} />}
-        {view === 'requests' && <RequestsView dashboard={dashboard} onUpdate={async (ticket, status) => { await appBackend.updateTicketStatus(ticket.id, status); await refresh(); }} />}
+        {view === 'requests' && <RequestsView dashboard={dashboard} onConnect={connectRemote} onUpdate={async (ticket, status) => { await appBackend.updateTicketStatus(ticket.id, status); await refresh(); }} />}
       </section>
 
       {showCreate && (
         <div className="modal-backdrop">
           <form className="create-modal" onSubmit={createUser}>
-            <div className="modal-head"><div><span>Nuevo usuario</span><h2>Crear y generar código</h2><p>Al terminar, el código queda copiado.</p></div><button type="button" onClick={() => setShowCreate(false)}><X size={17} /></button></div>
-            <label><span>Nombre</span><input autoFocus value={draft.fullName} onChange={(event) => setDraft((current) => ({ ...current, fullName: event.target.value }))} placeholder="Nombre de la persona o empresa" /></label>
+            <div className="modal-head"><div><span>Nuevo usuario</span><h2>Crear y copiar código</h2></div><button type="button" onClick={() => setShowCreate(false)}><X size={17} /></button></div>
+            <label><span>Nombre</span><input autoFocus value={draft.fullName} onChange={(event) => setDraft((current) => ({ ...current, fullName: event.target.value }))} placeholder="Nombre" /></label>
             <label><span>Correo <small>opcional</small></span><input type="email" value={draft.email} onChange={(event) => setDraft((current) => ({ ...current, email: event.target.value }))} placeholder="correo@ejemplo.com" /></label>
-            <label><span>Plan inicial</span><select value={draft.plan} onChange={(event) => setDraft((current) => ({ ...current, plan: event.target.value }))}><option value="basic">Básico · soporte esencial</option><option value="pro">Pro · uso frecuente</option><option value="max">Max · prioridad y mayor uso</option></select></label>
+            <label><span>Plan</span><select value={draft.plan} onChange={(event) => setDraft((current) => ({ ...current, plan: event.target.value }))}><option value="basic">Básico</option><option value="pro">Pro</option><option value="max">Max</option></select></label>
             <details>
-              <summary>Opciones adicionales</summary>
-              <div className="modal-grid"><label><span>Mensajes por mes</span><input type="number" value={draft.limit} onChange={(event) => setDraft((current) => ({ ...current, limit: event.target.value }))} /></label><label className="check-line"><input type="checkbox" checked={draft.isStaff} onChange={(event) => setDraft((current) => ({ ...current, isStaff: event.target.checked }))} /><span>Es parte del equipo NEXO</span></label></div>
+              <summary>Opciones</summary>
+              <div className="modal-grid"><label><span>Mensajes por mes</span><input type="number" value={draft.limit} onChange={(event) => setDraft((current) => ({ ...current, limit: event.target.value }))} /></label><label className="check-line"><input type="checkbox" checked={draft.isStaff} onChange={(event) => setDraft((current) => ({ ...current, isStaff: event.target.checked }))} /><span>Equipo NEXO</span></label></div>
             </details>
-            <button className="primary full" disabled={Boolean(busy) || !draft.fullName.trim()}>{busy || 'Crear usuario y copiar código'}</button>
+            <button className="primary full" disabled={Boolean(busy) || !draft.fullName.trim()}>{busy || 'Crear'}</button>
           </form>
         </div>
       )}
@@ -365,7 +391,7 @@ export default function AdminApp() {
 
 function DevicesView({ dashboard, onUpdate }: { dashboard: AdminDashboard | null; onUpdate: (device: DeviceRecord, patch: Partial<DeviceEntitlementRecord>) => Promise<void> }) {
   const devices = dashboard?.devices ?? [];
-  if (devices.length === 0) return <section className="panel empty-page"><Laptop size={30} /><h2>No hay equipos vinculados</h2><p>Creá un usuario y compartile su código de activación.</p></section>;
+  if (devices.length === 0) return <section className="panel empty-page"><Laptop size={30} /><h2>Sin equipos</h2><p>Generá un código.</p></section>;
   return (
     <section className="table-panel panel">
       <div className="table-head"><span>Equipo</span><span>Usuario</span><span>Estado</span><span>Plan</span><span>Uso</span></div>
@@ -386,20 +412,61 @@ function DevicesView({ dashboard, onUpdate }: { dashboard: AdminDashboard | null
   );
 }
 
-function RequestsView({ dashboard, onUpdate }: { dashboard: AdminDashboard | null; onUpdate: (ticket: TicketRecord, status: TicketRecord['status']) => Promise<void> }) {
+function remoteIdFromTicket(ticket: TicketRecord) {
+  const match = ticket.issue.match(/RustDesk\s+([A-Za-z0-9 -]{6,40})/i);
+  return match?.[1]?.trim() || null;
+}
+
+function RequestsView({
+  dashboard,
+  onUpdate,
+  onConnect
+}: {
+  dashboard: AdminDashboard | null;
+  onUpdate: (ticket: TicketRecord, status: TicketRecord['status']) => Promise<void>;
+  onConnect: (remoteId: string) => Promise<void>;
+}) {
   const tickets = dashboard?.tickets ?? [];
-  if (tickets.length === 0) return <section className="panel empty-page"><ShieldCheck size={30} /><h2>No hay solicitudes</h2><p>Todo está al día.</p></section>;
+  const reports = (dashboard?.diagnostics ?? [])
+    .flatMap((item) => isSupportRunPayload(item.payload) ? [{ record: item, report: item.payload as SupportRunReport }] : [])
+    .sort((a, b) => Date.parse(b.record.generatedAt) - Date.parse(a.record.generatedAt));
+
+  if (tickets.length === 0 && reports.length === 0) return <section className="panel empty-page"><ShieldCheck size={30} /><h2>Sin actividad</h2></section>;
+
   return (
-    <section className="requests-panel panel">
-      {tickets.map((ticket) => {
-        const device = dashboard?.devices.find((item) => item.id === ticket.deviceId);
-        return (
-          <article key={ticket.id}>
-            <div className="request-main"><span className={`priority ${ticket.priority}`} /><div><span>{ticket.id}</span><h3>{ticket.issue}</h3><p>{ticket.clientName} · {device?.displayName || 'Equipo sin identificar'}</p></div></div>
-            <select value={ticket.status} onChange={(event) => void onUpdate(ticket, event.target.value as TicketRecord['status'])}><option value="nuevo">Nueva</option><option value="esperando">En espera</option><option value="en-remoto">En asistencia</option><option value="cerrado">Resuelta</option></select>
-          </article>
-        );
-      })}
-    </section>
+    <div className="support-control-grid">
+      <section className="requests-panel panel">
+        <header className="control-section-title"><Headphones size={17} /><b>Solicitudes</b><span>{tickets.length}</span></header>
+        {tickets.map((ticket) => {
+          const device = dashboard?.devices.find((item) => item.id === ticket.deviceId);
+          const remoteId = remoteIdFromTicket(ticket);
+          return (
+            <article key={ticket.id}>
+              <div className="request-main"><span className={`priority ${ticket.priority}`} /><div><span>{ticket.id}</span><h3>{remoteId ? `RustDesk ${remoteId}` : ticket.issue}</h3><p>{ticket.clientName} · {device?.displayName || 'Equipo'}</p></div></div>
+              <div className="request-actions">
+                {remoteId && <button onClick={() => void onConnect(remoteId)}><ExternalLink size={14} /> Conectar</button>}
+                <select value={ticket.status} onChange={(event) => void onUpdate(ticket, event.target.value as TicketRecord['status'])}><option value="nuevo">Nueva</option><option value="esperando">En espera</option><option value="en-remoto">En asistencia</option><option value="cerrado">Resuelta</option></select>
+              </div>
+            </article>
+          );
+        })}
+      </section>
+
+      <section className="reports-panel panel">
+        <header className="control-section-title"><ClipboardCheck size={17} /><b>Reportes</b><span>{reports.length}</span></header>
+        {reports.map(({ record, report }) => {
+          const device = dashboard?.devices.find((item) => item.id === record.deviceId);
+          const delta = diagnosticDelta(report.before, report.after);
+          return (
+            <article key={record.id}>
+              <div className="report-head"><div><span>{device?.displayName || 'Equipo'}</span><h3>{report.issue}</h3></div><time>{new Date(report.completedAt || report.createdAt).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}</time></div>
+              <p>{report.summary}</p>
+              {report.actions.length > 0 && <small>{report.actions.map((action) => action.label).join(' · ')}</small>}
+              {delta.length > 0 && <b>{delta.join(' · ')}</b>}
+            </article>
+          );
+        })}
+      </section>
+    </div>
   );
 }
