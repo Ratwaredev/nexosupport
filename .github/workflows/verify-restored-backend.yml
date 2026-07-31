@@ -49,18 +49,28 @@ jobs:
             cat /tmp/nexo-auth-health.json >&2 || true
             exit 1
           fi
+          echo 'Auth: OK'
 
           for table in admin_users support_users devices device_entitlements device_consents tickets diagnostics releases pairing_codes; do
-            code="$(curl --silent --show-error --max-time 20 --output "/tmp/nexo-${table}.json" --write-out '%{http_code}' \
+            body="/tmp/nexo-${table}.json"
+            code="$(curl --silent --show-error --max-time 20 --output "$body" --write-out '%{http_code}' \
               -H "apikey: ${VITE_SUPABASE_ANON_KEY}" \
               -H "Authorization: Bearer ${VITE_SUPABASE_ANON_KEY}" \
               "${base}/rest/v1/${table}?select=*&limit=1")"
-            if [ "$code" != '200' ]; then
-              echo "Table ${table} is unavailable (HTTP ${code})." >&2
-              cat "/tmp/nexo-${table}.json" >&2 || true
-              exit 1
+
+            if [ "$code" = '200' ]; then
+              echo "${table}: OK"
+              continue
             fi
-            echo "${table}: OK"
+
+            if [ "$code" = '401' ] && grep -q '"code":"42501"' "$body"; then
+              echo "${table}: OK (protected)"
+              continue
+            fi
+
+            echo "Table ${table} is unavailable (HTTP ${code})." >&2
+            cat "$body" >&2 || true
+            exit 1
           done
 
           echo 'NEXO backend restored and schema available.'
