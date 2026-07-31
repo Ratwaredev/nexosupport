@@ -135,6 +135,20 @@ fn powershell_quote(value: &str) -> String {
     value.replace('`', "``").replace('"', "`\"")
 }
 
+#[cfg(target_os = "windows")]
+fn normalize_remote_id(value: &str) -> Result<String, String> {
+    let compact: String = value.chars().filter(|value| !value.is_whitespace()).collect();
+    if compact.len() < 5
+        || compact.len() > 40
+        || !compact
+            .chars()
+            .all(|value| value.is_ascii_alphanumeric() || value == '-' || value == '_')
+    {
+        return Err("El ID remoto no es válido.".to_string());
+    }
+    Ok(compact)
+}
+
 #[tauri::command]
 pub fn managed_remote_tool_status() -> Result<RemoteClientStatus, String> {
     #[cfg(target_os = "windows")]
@@ -219,6 +233,32 @@ pub fn managed_open_remote_tool() -> Result<RemoteClientStatus, String> {
     }
     #[cfg(not(target_os = "windows"))]
     {
+        Ok(missing())
+    }
+}
+
+#[tauri::command]
+pub fn managed_connect_remote_tool(remote_id: String) -> Result<RemoteClientStatus, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let current = status();
+        let path = current
+            .path
+            .as_deref()
+            .ok_or_else(|| "RustDesk no está instalado.".to_string())?;
+        let remote_id = normalize_remote_id(&remote_id)?;
+        let mut command = Command::new(path);
+        command
+            .args(["--connect", &remote_id])
+            .creation_flags(CREATE_NO_WINDOW);
+        command
+            .spawn()
+            .map_err(|error| format!("No se pudo abrir la conexión: {error}"))?;
+        Ok(current)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = remote_id;
         Ok(missing())
     }
 }
