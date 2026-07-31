@@ -103,7 +103,11 @@ requireMatch(secureSql, /ticket_id[\s\S]*device_id = device_row\.id/, 'La sesió
 requireMatch(admin, /isSupportRunPayload/, 'Control debe leer reportes del agente.');
 requireMatch(admin, /managed_connect_remote_tool/, 'Control debe abrir la solicitud remota.');
 requireMatch(admin, /clearAdminSession[\s\S]*STORAGE_KEYS\.adminSession/, 'Control debe exigir una sesión nueva al abrir Administración.');
+requireMatch(admin, /recoverAccess[\s\S]*auth\/v1\/recover/, 'Control debe permitir recuperar el acceso.');
+requireMatch(admin, /deviceCountByUser/, 'Control debe evitar cálculos repetidos por usuario.');
+requireMatch(admin, /admin-loading/, 'Control debe mostrar una carga aislada antes del panel.');
 forbidMatch(admin, /setInterval\(poll/, 'Control no debe consultar la base continuamente.');
+requireMatch(updater + admin, /sessionStorage/, 'La sesión administrativa debe vivir sólo durante la ventana.');
 
 requireMatch(windows, /monitor\.work_area\(\)/, 'La posición debe usar el área de trabajo y no tapar la barra de tareas.');
 requireMatch(windows, /work_size\.height[\s\S]*?size\.height/, 'La esquina inferior debe calcularse con el alto útil.');

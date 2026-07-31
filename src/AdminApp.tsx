@@ -71,10 +71,16 @@ export default function AdminApp() {
   const [showCreate, setShowCreate] = useState(false);
   const [draft, setDraft] = useState<UserDraft>(emptyDraft);
   const [generatedCode, setGeneratedCode] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [recovering, setRecovering] = useState(false);
+  const [failedAttempts, setFailedAttempts] = useState(0);
   const refreshing = useRef(false);
 
   useEffect(() => {
-    const clearAdminSession = () => localStorage.removeItem(STORAGE_KEYS.adminSession);
+    const clearAdminSession = () => {
+      localStorage.removeItem(STORAGE_KEYS.adminSession);
+      sessionStorage.removeItem(STORAGE_KEYS.adminSession);
+    };
     clearAdminSession();
     setSession(null);
     setDashboard(null);
@@ -97,6 +103,15 @@ export default function AdminApp() {
     () => selectedUser ? (dashboard?.devices ?? []).filter((device) => device.supportUserId === selectedUser.id) : [],
     [dashboard?.devices, selectedUser]
   );
+
+  const deviceCountByUser = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const device of dashboard?.devices ?? []) {
+      if (!device.supportUserId) continue;
+      counts.set(device.supportUserId, (counts.get(device.supportUserId) ?? 0) + 1);
+    }
+    return counts;
+  }, [dashboard?.devices]);
 
   const reportsCount = useMemo(
     () => dashboard?.diagnostics.filter((item) => isSupportRunPayload(item.payload)).length ?? 0,
@@ -128,16 +143,62 @@ export default function AdminApp() {
 
   async function login(event: FormEvent) {
     event.preventDefault();
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+      setError('Ingresá un correo válido.');
+      return;
+    }
+    if (!password) {
+      setError('Ingresá tu contraseña.');
+      return;
+    }
+    if (failedAttempts >= 5) {
+      setError('Demasiados intentos. Cerrá Administración y volvé a abrirla.');
+      return;
+    }
     setBusy('Ingresando');
     setError('');
     try {
-      const result = await appBackend.signInAdmin(email.trim(), password);
+      const result = await appBackend.signInAdmin(normalizedEmail, password);
       setSession(result.session);
+      setFailedAttempts(0);
       await refresh();
     } catch (reason) {
+      setFailedAttempts((current) => current + 1);
       setError(adminError(reason));
     } finally {
       setBusy('');
+    }
+  }
+
+  async function recoverAccess() {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+      setError('Escribí primero tu correo administrador.');
+      return;
+    }
+    if (!backendConfig.supabaseUrl || !backendConfig.supabaseAnonKey) {
+      setError('La recuperación no está disponible en modo local.');
+      return;
+    }
+    setRecovering(true);
+    setError('');
+    try {
+      const response = await fetch(`${backendConfig.supabaseUrl.replace(/\/$/, '')}/auth/v1/recover`, {
+        method: 'POST',
+        headers: {
+          apikey: backendConfig.supabaseAnonKey,
+          Authorization: `Bearer ${backendConfig.supabaseAnonKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ email: normalizedEmail })
+      });
+      if (!response.ok) throw new Error(await response.text());
+      setNotice('Te enviamos el enlace para recuperar el acceso.');
+    } catch (reason) {
+      setError(adminError(reason));
+    } finally {
+      setRecovering(false);
     }
   }
 
@@ -238,6 +299,7 @@ export default function AdminApp() {
   const showSupport = () => isTauriRuntime() ? safeInvoke('show_main_window') : Promise.resolve();
   const closeAdmin = async () => {
     localStorage.removeItem(STORAGE_KEYS.adminSession);
+    sessionStorage.removeItem(STORAGE_KEYS.adminSession);
     setSession(null);
     setDashboard(null);
     if (isTauriRuntime()) await safeInvoke('close_admin_window');
@@ -246,17 +308,36 @@ export default function AdminApp() {
   if (!session) {
     return (
       <main className="admin-login">
-        <section className="login-card">
-          <div className="login-brand"><NexoMark size={32} /><span><b>NEXO</b><small>Control</small></span></div>
-          <div className="login-copy"><h1>Administración</h1><p>Usuarios, equipos y soporte.</p></div>
-          <form onSubmit={login}>
-            <label><span>Correo</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" /></label>
-            <label><span>Contraseña</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>
-            {error && <div className="form-error"><CircleAlert size={15} />{error}</div>}
-            <button disabled={Boolean(busy)}>{busy || 'Entrar'}</button>
-          </form>
-          <button className="login-close" onClick={() => void closeAdmin()}><X size={16} /> Cerrar</button>
+        <section className="login-shell">
+          <aside className="login-visual">
+            <div className="login-brand"><NexoMark size={35} /><span><b>NEXO</b><small>Control</small></span></div>
+            <div className="login-visual-copy"><span>ACCESO PRIVADO</span><h1>Administración segura.</h1><p>Usuarios, equipos y soporte remoto.</p></div>
+            <div className="login-security"><ShieldCheck size={18} /><span><b>Sesión temporal</b><small>Se cierra al salir de esta ventana.</small></span></div>
+          </aside>
+          <section className="login-card">
+            <button className="login-close" onClick={() => void closeAdmin()} aria-label="Cerrar"><X size={17} /></button>
+            <div className="login-copy"><span>NEXO CONTROL</span><h2>Iniciar sesión</h2><p>Usá tu cuenta administradora.</p></div>
+            <form onSubmit={login}>
+              <label><span>Correo</span><input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" placeholder="admin@empresa.com" /></label>
+              <label><span>Contraseña</span><div className="password-input"><input type={showPassword ? 'text' : 'password'} required value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /><button type="button" onClick={() => setShowPassword((current) => !current)}>{showPassword ? 'Ocultar' : 'Mostrar'}</button></div></label>
+              <div className="login-options"><span>Cuenta autorizada</span><button type="button" onClick={() => void recoverAccess()} disabled={recovering}>{recovering ? 'Enviando…' : 'Recuperar acceso'}</button></div>
+              {error && <div className="form-error"><CircleAlert size={15} />{error}</div>}
+              {notice && <div className="form-success"><Check size={15} />{notice}</div>}
+              <button disabled={Boolean(busy) || failedAttempts >= 5}>{busy || 'Entrar a Control'}</button>
+            </form>
+            <p className="login-help">El correo debe existir en NEXO y tener permiso de administrador.</p>
+          </section>
         </section>
+      </main>
+    );
+  }
+
+  if (!dashboard) {
+    return (
+      <main className="admin-loading">
+        <NexoMark size={38} />
+        <span className="admin-loading-ring" />
+        <p>Cargando Control</p>
       </main>
     );
   }
@@ -303,8 +384,8 @@ export default function AdminApp() {
             <section className="users-list panel">
               <div className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar" /></div>
               <div className="list-scroll">
-                {users.map((user) => {
-                  const count = (dashboard?.devices ?? []).filter((device) => device.supportUserId === user.id).length;
+                {users.slice(0, 120).map((user) => {
+                  const count = deviceCountByUser.get(user.id) ?? 0;
                   return (
                     <button key={user.id} className={selectedUser?.id === user.id ? 'selected' : ''} onClick={() => { setSelectedUserId(user.id); setGeneratedCode(''); }}>
                       <span className="user-avatar">{user.fullName.slice(0, 1).toUpperCase()}</span>
@@ -397,7 +478,7 @@ function DevicesView({ dashboard, onUpdate }: { dashboard: AdminDashboard | null
   return (
     <section className="table-panel panel">
       <div className="table-head"><span>Equipo</span><span>Usuario</span><span>Estado</span><span>Plan</span><span>Uso</span></div>
-      {devices.map((device) => {
+      {devices.slice(0, 160).map((device) => {
         const user = dashboard?.users.find((item) => item.id === device.supportUserId);
         const entitlement = dashboard?.entitlements.find((item) => item.deviceId === device.id);
         return (
@@ -439,7 +520,7 @@ function RequestsView({
     <div className="support-control-grid">
       <section className="requests-panel panel">
         <header className="control-section-title"><Headphones size={17} /><b>Solicitudes</b><span>{tickets.length}</span></header>
-        {tickets.map((ticket) => {
+        {tickets.slice(0, 80).map((ticket) => {
           const device = dashboard?.devices.find((item) => item.id === ticket.deviceId);
           const remoteId = remoteIdFromTicket(ticket);
           return (
@@ -456,7 +537,7 @@ function RequestsView({
 
       <section className="reports-panel panel">
         <header className="control-section-title"><ClipboardCheck size={17} /><b>Reportes</b><span>{reports.length}</span></header>
-        {reports.map(({ record, report }) => {
+        {reports.slice(0, 40).map(({ record, report }) => {
           const device = dashboard?.devices.find((item) => item.id === record.deviceId);
           const delta = diagnosticDelta(report.before, report.after);
           return (
