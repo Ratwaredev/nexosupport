@@ -1,10 +1,10 @@
-name: Apply NEXO contract fix
+name: Apply NEXO admin fix
 
 on:
   push:
     branches: [main]
     paths:
-      - .github/nexo-contracts.trigger
+      - .github/nexo-admin-fix.trigger
 
 permissions:
   contents: write
@@ -14,18 +14,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Update product contracts
-        run: python .github/scripts/update_nexo_contracts.py
+      - name: Apply admin patch
+        run: python .github/scripts/apply_admin_login_performance.py
       - name: Validate frontend and contracts
         run: |
           npm ci
           npm run build
           node scripts/verify-product-contracts.mjs
-      - name: Commit contract fix
+      - name: Commit admin fix
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add scripts/verify-product-contracts.mjs
-          git commit -m "Update contracts for safer admin and RustDesk flow"
+          git add src/AdminApp.tsx src/admin.css src/lib/backend.ts scripts/verify-product-contracts.mjs
+          git commit -m "Build professional admin login and reduce dashboard load"
           git push
