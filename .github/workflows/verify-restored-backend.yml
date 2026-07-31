@@ -1,0 +1,66 @@
+name: Verify restored NEXO backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-restored-backend.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+    steps:
+      - name: Verify backend configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${VITE_SUPABASE_URL:-}" ]; then
+            echo 'VITE_SUPABASE_URL is missing.' >&2
+            exit 1
+          fi
+          if [ -z "${VITE_SUPABASE_ANON_KEY:-}" ]; then
+            echo 'VITE_SUPABASE_ANON_KEY is missing.' >&2
+            exit 1
+          fi
+
+          base="${VITE_SUPABASE_URL%/}"
+          host="$(python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+          print(urlparse(os.environ['VITE_SUPABASE_URL']).hostname or '')
+          PY
+          )"
+          echo "Backend host: ${host}"
+          getent hosts "$host" >/dev/null
+
+          health_code="$(curl --silent --show-error --max-time 20 --output /tmp/nexo-auth-health.json --write-out '%{http_code}' \
+            -H "apikey: ${VITE_SUPABASE_ANON_KEY}" \
+            "${base}/auth/v1/health")"
+          if [ "$health_code" != '200' ]; then
+            echo "Supabase Auth health returned HTTP ${health_code}." >&2
+            cat /tmp/nexo-auth-health.json >&2 || true
+            exit 1
+          fi
+
+          for table in admin_users support_users devices device_entitlements device_consents tickets diagnostics releases pairing_codes; do
+            code="$(curl --silent --show-error --max-time 20 --output "/tmp/nexo-${table}.json" --write-out '%{http_code}' \
+              -H "apikey: ${VITE_SUPABASE_ANON_KEY}" \
+              -H "Authorization: Bearer ${VITE_SUPABASE_ANON_KEY}" \
+              "${base}/rest/v1/${table}?select=*&limit=1")"
+            if [ "$code" != '200' ]; then
+              echo "Table ${table} is unavailable (HTTP ${code})." >&2
+              cat "/tmp/nexo-${table}.json" >&2 || true
+              exit 1
+            fi
+            echo "${table}: OK"
+          done
+
+          echo 'NEXO backend restored and schema available.'
