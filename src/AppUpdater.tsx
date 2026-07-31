@@ -13,7 +13,8 @@ type UpdateState =
 
 type DismissedUpdate = { version: string; until: number };
 
-const AUTO_CHECK_EVERY_MS = 24 * 60 * 60 * 1000;
+const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
+const AUTO_CHECK_EVERY_MS = Math.max(24 * 60 * 60 * 1000, CHECK_EVERY_MS);
 const SNOOZE_MS = 24 * 60 * 60 * 1000;
 const LAST_CHECK_KEY = 'nexo:update:last-successful-check';
 
