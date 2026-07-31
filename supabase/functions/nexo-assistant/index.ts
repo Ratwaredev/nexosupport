@@ -37,7 +37,7 @@ type Consent = {
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Cache-Control': 'no-store'
 };
 
@@ -157,6 +157,10 @@ function safeContext(value: unknown, allowed: boolean, limit = 9000) {
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+  if (request.method === 'GET') {
+    const ok = Boolean(env('SUPABASE_URL') && env('SUPABASE_SERVICE_ROLE_KEY') && env('OPENROUTER_API_KEY'));
+    return json({ ok, service: 'nexo-assistant' }, ok ? 200 : 503);
+  }
   if (request.method !== 'POST') return json({ error: 'Método no permitido.' }, 405);
   const length = Number(request.headers.get('content-length') || 0);
   if (length > 120_000) return json({ error: 'Solicitud demasiado grande.' }, 413);
