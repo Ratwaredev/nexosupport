@@ -102,8 +102,8 @@ requireMatch(deployAgent, /functions deploy nexo-assistant/, 'El agente debe des
 requireMatch(secureSql, /ticket_id[\s\S]*device_id = device_row\.id/, 'La sesión remota debe quedar ligada a su propia PC.');
 requireMatch(admin, /isSupportRunPayload/, 'Control debe leer reportes del agente.');
 requireMatch(admin, /managed_connect_remote_tool/, 'Control debe abrir la solicitud remota.');
-requireMatch(admin, /setInterval\(poll, 15000\)/, 'Control debe actualizar solicitudes sin saturar el backend.');
-requireMatch(admin, /document\.visibilityState === 'visible'/, 'Control no debe consultar mientras está oculto.');
+requireMatch(admin, /clearAdminSession[\s\S]*STORAGE_KEYS\.adminSession/, 'Control debe exigir una sesión nueva al abrir Administración.');
+forbidMatch(admin, /setInterval\(poll/, 'Control no debe consultar la base continuamente.');
 
 requireMatch(windows, /monitor\.work_area\(\)/, 'La posición debe usar el área de trabajo y no tapar la barra de tareas.');
 requireMatch(windows, /work_size\.height[\s\S]*?size\.height/, 'La esquina inferior debe calcularse con el alto útil.');
@@ -138,7 +138,8 @@ requireMatch(remote, /managed_connect_remote_tool[\s\S]*?--connect/, 'Control de
 requireMatch(remote, /normalize_remote_id/, 'El ID remoto debe validarse antes de abrirlo.');
 requireMatch(remoteSupport, /id\?: string \| null/, 'La UI debe recibir el ID remoto.');
 requireMatch(support, /issue: status\.id \? `Soporte remoto · RustDesk \$\{status\.id\}`/, 'La solicitud debe incluir el ID remoto.');
-requireMatch(support, /createTicket[\s\S]*?createRemoteSession[\s\S]*?openRemoteTool/, 'Soporte remoto debe guardar la solicitud antes de abrir RustDesk.');
+forbidMatch(support, /async function startRemote[\s\S]*?setSupportCode\(remoteSession\.code\);\s*await openRemoteTool\(\)/, 'Crear una solicitud no puede abrir RustDesk automáticamente.');
+requireMatch(support, /supportCode \?[\s\S]*Abrir RustDesk/, 'RustDesk debe abrirse solamente desde un botón explícito.');
 requireMatch(validateWorkflow, /prepare-rustdesk\.ps1/, 'CI debe construir el paquete con RustDesk.');
 requireMatch(releaseWorkflow, /prepare-rustdesk\.ps1/, 'El release debe construir el paquete con RustDesk.');
 
@@ -153,7 +154,8 @@ requireMatch(updater, /const CHECK_EVERY_MS = 6 \* 60 \* 60 \* 1000/, 'NEXO debe
 requireMatch(updater, /app-update-installing/, 'La actualización debe tener un indicador propio.');
 forbidMatch(updater, /progressTimer|setProgress\(/, 'El actualizador no debe simular progreso con renders constantes.');
 requireMatch(updaterCss, /\.app-update-installing/, 'Falta el indicador compacto de actualización.');
-forbidMatch(updaterCss, /backdrop-filter/, 'El actualizador no debe aplicar blur de pantalla completa.');
+requireMatch(updaterCss, /\.app-update-orb/, 'La instalación debe mostrar el círculo eléctrico violeta.');
+forbidMatch(updaterCss, /inset:0[^}]*backdrop-filter/, 'El actualizador no debe aplicar blur de pantalla completa.');
 forbidMatch(updater, /release\.notes|Cambios incluidos|Cerrar NEXO/, 'El updater volvió a mostrar texto innecesario.');
 
 requireMatch(releaseWorkflow, /VITE_SUPABASE_URL/, 'El release debe recibir la URL del backend.');
