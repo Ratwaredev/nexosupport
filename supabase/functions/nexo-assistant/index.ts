@@ -1,5 +1,6 @@
 type ToolName =
   | 'run_quick_diagnostic'
+  | 'disk_health'
   | 'network_check'
   | 'scan_temp_files'
   | 'startup_review'
@@ -42,6 +43,7 @@ const cors = {
 
 const allowedTools = new Set<ToolName>([
   'run_quick_diagnostic',
+  'disk_health',
   'network_check',
   'scan_temp_files',
   'startup_review',
@@ -54,7 +56,8 @@ const allowedTools = new Set<ToolName>([
 ]);
 
 const tools = [
-  tool('run_quick_diagnostic', 'Lee RAM, disco, reinicio pendiente, seguridad e inicio. No modifica nada.'),
+  tool('run_quick_diagnostic', 'Lee RAM, espacio, reinicio pendiente, seguridad e inicio. No modifica nada.'),
+  tool('disk_health', 'Lee estado, medio, temperatura, desgaste, errores y predicción de falla expuestos por Windows. No modifica nada.'),
   tool('network_check', 'Comprueba adaptador, DNS, gateway y salida a Internet. No modifica nada.'),
   tool('scan_temp_files', 'Mide archivos temporales permitidos y espacio recuperable. No borra nada.'),
   tool('startup_review', 'Lista programas de inicio. No desactiva nada.'),
@@ -213,6 +216,7 @@ SEGURIDAD
 
 FLUJO
 - Ante un problema amplio o rendimiento lento, empezá con run_quick_diagnostic.
+- Si el problema menciona disco lento, disco al 100%, ruidos o bloqueos, pedí disk_health después del diagnóstico general.
 - Usá la evidencia para decidir la siguiente lectura.
 - Pedí un cambio solo si la evidencia lo justifica.
 - Después de un cambio, pedí run_quick_diagnostic para verificar.
