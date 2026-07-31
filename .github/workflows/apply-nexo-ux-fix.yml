@@ -17,11 +17,9 @@ jobs:
       - name: Apply patch
         run: python .github/scripts/apply_nexo_ux_fix.py
       - name: Validate frontend
-        shell: bash
         run: |
-          corepack enable
-          pnpm install --frozen-lockfile
-          pnpm run build
+          npm ci
+          npm run build
       - name: Commit fixes
         shell: bash
         run: |
