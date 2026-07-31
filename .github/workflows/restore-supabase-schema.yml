@@ -1,4 +1,5 @@
 name: Restore current NEXO schema
+# Retry after the professional NEXO Control login rollout.
 
 on:
   push:
