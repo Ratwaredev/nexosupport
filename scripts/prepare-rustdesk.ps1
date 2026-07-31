@@ -25,3 +25,8 @@ if ($actual -ne $expected) {
 }
 
 Write-Host "RustDesk $Version prepared from pinned artifact: $target"
+
+if ($env:GITHUB_ACTIONS -eq 'true' -and $env:GITHUB_REF -eq 'refs/heads/main') {
+  & (Join-Path $PSScriptRoot 'verify-agent-service.ps1')
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
