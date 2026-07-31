@@ -2,14 +2,8 @@ use tauri::{
     AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
-fn dispatch_update_check(window: &WebviewWindow, manual: bool) {
-    let event_name = if manual {
-        "nexo:check-update"
-    } else {
-        "nexo:check-update-passive"
-    };
-    let script = format!("window.dispatchEvent(new Event({event_name:?}));");
-    let _ = window.eval(&script);
+fn dispatch_manual_update_check(window: &WebviewWindow) {
+    let _ = window.eval("window.dispatchEvent(new Event('nexo:check-update')); ");
 }
 
 pub fn reveal_main_window(app: &AppHandle, manual_update_check: bool) -> Result<(), String> {
@@ -21,7 +15,9 @@ pub fn reveal_main_window(app: &AppHandle, manual_update_check: bool) -> Result<
     position_popup(&window);
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
-    dispatch_update_check(&window, manual_update_check);
+    if manual_update_check {
+        dispatch_manual_update_check(&window);
+    }
     Ok(())
 }
 
@@ -50,11 +46,10 @@ pub fn exit_app(app: AppHandle) {
 
 #[tauri::command]
 pub fn open_admin_window(app: AppHandle) -> Result<(), String> {
+    // A failed WebView must never be reused as a permanent white window.
+    // Administration is cheap to recreate and its session is intentionally temporary.
     if let Some(window) = app.get_webview_window("admin") {
-        window.unminimize().map_err(|error| error.to_string())?;
-        window.show().map_err(|error| error.to_string())?;
-        window.set_focus().map_err(|error| error.to_string())?;
-        return Ok(());
+        window.close().map_err(|error| error.to_string())?;
     }
 
     let window = WebviewWindowBuilder::new(
@@ -63,8 +58,8 @@ pub fn open_admin_window(app: AppHandle) -> Result<(), String> {
         WebviewUrl::App("admin.html".into()),
     )
     .title("NEXO Control")
-    .inner_size(1180.0, 760.0)
-    .min_inner_size(940.0, 640.0)
+    .inner_size(1100.0, 720.0)
+    .min_inner_size(860.0, 560.0)
     .resizable(true)
     .maximizable(true)
     .minimizable(true)
@@ -75,7 +70,7 @@ pub fn open_admin_window(app: AppHandle) -> Result<(), String> {
     .visible(true)
     .center()
     .build()
-    .map_err(|error| format!("No pude crear NEXO Control: {error}"))?;
+    .map_err(|error| format!("No se pudo crear NEXO Control: {error}"))?;
 
     window.set_focus().map_err(|error| error.to_string())
 }

@@ -1,12 +1,11 @@
 name: Publish NEXO Support release
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-  workflow_dispatch:
+    paths:
+      - '.release-trigger'
 
 concurrency:
   group: nexo-production-release
@@ -145,14 +144,11 @@ jobs:
           tagName: v__VERSION__
           releaseName: NEXO Support v__VERSION__
           releaseBody: |
-            Actualización de soporte de escritorio.
+            Actualización estable de NEXO Support.
 
-            - Ventana ubicada sobre la barra de tareas y restaurada abajo a la derecha.
-            - Herramientas simples, sin textos repetidos ni estados decorativos.
-            - Optimización con progreso real de 0 a 100 y una sola nave durante la limpieza.
-            - RustDesk incluido e instalado junto con NEXO para dejar el soporte remoto listo.
-            - ID remoto asociado a la solicitud visible en Administración cuando el backend está conectado.
-            - Nuevo icono transparente y actualizador visual más limpio.
+            - El updater ya no reinicia copias viejas ni busca una versión en cada apertura.
+            - Administración abre con una pantalla segura, se puede cerrar con Esc y no reutiliza ventanas blancas.
+            - Las publicaciones son deliberadas: un cambio interno ya no genera automáticamente otra versión pública.
           releaseDraft: false
           prerelease: false
           updaterJsonPreferNsis: true
@@ -219,15 +215,11 @@ jobs:
           }
           if (-not $probe.ok) { throw $probe.error }
 
-      - name: Record production release status
+      - name: Record release result
         if: always()
         uses: actions/github-script@v7
         env:
           RELEASE_STATUS: ${{ job.status }}
-          RELEASE_VERSION: ${{ env.NEXO_VERSION }}
-          RELEASE_URL: ${{ steps.publish_release.outputs.releaseHtmlUrl }}
-          UPDATER_PLATFORM: ${{ env.UPDATER_PLATFORM }}
-          RUNTIME_MODE: ${{ env.NEXO_RUNTIME_MODE }}
         with:
           script: |
             const fs = require('fs');
@@ -243,16 +235,16 @@ jobs:
               if (error.status !== 404) throw error;
             }
             let updaterProbe = null;
-            if (fs.existsSync('updater-probe.json')) updaterProbe = JSON.parse(fs.readFileSync('updater-probe.json', 'utf8').replace(/^\uFEFF/, ''));
+            try { updaterProbe = JSON.parse(fs.readFileSync('updater-probe.json', 'utf8').replace(/^\uFEFF/, '')); } catch {}
             const payload = {
-              version: process.env.RELEASE_VERSION || null,
+              version: process.env.NEXO_VERSION || null,
               status: process.env.RELEASE_STATUS,
               runId: String(context.runId),
               commit: context.sha,
-              releaseUrl: process.env.RELEASE_URL || null,
+              releaseUrl: process.env.NEXO_VERSION ? `https://github.com/${owner}/${repo}/releases/tag/v${process.env.NEXO_VERSION}` : null,
               updaterPlatform: process.env.UPDATER_PLATFORM || null,
               updaterProbe,
-              runtimeMode: process.env.RUNTIME_MODE || 'local',
+              runtimeMode: process.env.NEXO_RUNTIME_MODE || null,
               recordedAt: new Date().toISOString()
             };
             await github.rest.repos.createOrUpdateFileContents({
@@ -261,6 +253,6 @@ jobs:
               path,
               branch,
               sha,
-              message: `release: ${payload.version || 'unknown'} ${payload.status}`,
+              message: `release: ${payload.status} ${payload.version || ''}`.trim(),
               content: Buffer.from(`${JSON.stringify(payload, null, 2)}\n`).toString('base64')
             });
