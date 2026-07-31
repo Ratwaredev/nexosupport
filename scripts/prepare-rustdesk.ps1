@@ -1,6 +1,6 @@
 param(
   [string]$Version = '1.4.9',
-  [string]$ReleaseTag = 'nightly',
+  [string]$ReleaseTag = '1.4.9',
   [string]$Sha256 = '4cd9af0d822891f2676088e11c869d4a75d956ee7af50797092986b6d4878f85'
 )
 
