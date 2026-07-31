@@ -1,0 +1,78 @@
+name: Deploy NEXO agent
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/nexo-assistant/**'
+      - 'supabase/config.toml'
+      - 'infra/supabase/secure-agent.sql'
+      - '.github/workflows/deploy-agent.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nexo-agent-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      NEXO_DEFAULT_MODEL: ${{ secrets.NEXO_DEFAULT_MODEL }}
+      NEXO_MODEL_BASIC: ${{ secrets.NEXO_MODEL_BASIC }}
+      NEXO_MODEL_PRO: ${{ secrets.NEXO_MODEL_PRO }}
+      NEXO_MODEL_MAX: ${{ secrets.NEXO_MODEL_MAX }}
+      NEXO_APP_URL: ${{ secrets.NEXO_APP_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify deployment secrets
+        shell: bash
+        run: |
+          test -n "$SUPABASE_ACCESS_TOKEN" || { echo 'Missing SUPABASE_ACCESS_TOKEN'; exit 1; }
+          test -n "$SUPABASE_PROJECT_REF" || { echo 'Missing SUPABASE_PROJECT_REF'; exit 1; }
+          test -n "$OPENROUTER_API_KEY" || { echo 'Missing OPENROUTER_API_KEY'; exit 1; }
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Apply security migration
+        shell: bash
+        run: |
+          python - <<'PY' > "$RUNNER_TEMP/nexo-sql.json"
+          import json
+          from pathlib import Path
+          print(json.dumps({"query": Path("infra/supabase/secure-agent.sql").read_text(encoding="utf-8"), "read_only": False}))
+          PY
+          curl --fail-with-body --silent --show-error \
+            -X POST "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_REF/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary "@$RUNNER_TEMP/nexo-sql.json"
+          rm -f "$RUNNER_TEMP/nexo-sql.json"
+
+      - name: Configure server secrets
+        shell: bash
+        run: |
+          umask 077
+          {
+            printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
+            printf 'NEXO_DEFAULT_MODEL=%s\n' "${NEXO_DEFAULT_MODEL:-openrouter/auto}"
+            printf 'NEXO_MODEL_BASIC=%s\n' "${NEXO_MODEL_BASIC:-openrouter/auto}"
+            printf 'NEXO_MODEL_PRO=%s\n' "${NEXO_MODEL_PRO:-openrouter/auto}"
+            printf 'NEXO_MODEL_MAX=%s\n' "${NEXO_MODEL_MAX:-openrouter/auto}"
+            printf 'NEXO_APP_URL=%s\n' "${NEXO_APP_URL:-https://nexo.local}"
+          } > "$RUNNER_TEMP/nexo-agent.env"
+          supabase secrets set --project-ref "$SUPABASE_PROJECT_REF" --env-file "$RUNNER_TEMP/nexo-agent.env"
+          rm -f "$RUNNER_TEMP/nexo-agent.env"
+
+      - name: Deploy function
+        run: supabase functions deploy nexo-assistant --project-ref "$SUPABASE_PROJECT_REF" --no-verify-jwt

@@ -1,26 +1,32 @@
 param(
-  [string]$Version = '1.4.9'
+  [string]$Version = '1.4.9',
+  [string]$ReleaseTag = '1.4.9',
+  [string]$Sha256 = 'eaedeb0088e687bf46f7c46a9c6ea5493ce51f3134dfd6acbedb47b5b9136274'
 )
 
 $ErrorActionPreference = 'Stop'
 $headers = @{ 'User-Agent' = 'NEXO-Support-Build' }
-$releaseUrl = "https://api.github.com/repos/rustdesk/rustdesk/releases/tags/$Version"
-$release = Invoke-RestMethod -Uri $releaseUrl -Headers $headers
-$expectedName = "rustdesk-$Version-x86_64.exe"
-$asset = @($release.assets | Where-Object { $_.name -eq $expectedName }) | Select-Object -First 1
-if (-not $asset) { throw "RustDesk asset not found: $expectedName" }
+$fileName = "rustdesk-$Version-x86_64.exe"
+$downloadUrl = "https://github.com/rustdesk/rustdesk/releases/download/$ReleaseTag/$fileName"
 
 $targetDirectory = Join-Path $PSScriptRoot '..\src-tauri\resources\rustdesk'
 $targetDirectory = [System.IO.Path]::GetFullPath($targetDirectory)
 New-Item -ItemType Directory -Force -Path $targetDirectory | Out-Null
 $target = Join-Path $targetDirectory 'rustdesk-installer.exe'
-Invoke-WebRequest -Uri $asset.browser_download_url -Headers $headers -OutFile $target -UseBasicParsing
 
+Invoke-WebRequest -Uri $downloadUrl -Headers $headers -OutFile $target -UseBasicParsing -MaximumRetryCount 4 -RetryIntervalSec 3
 if ((Get-Item $target).Length -lt 5MB) { throw 'Downloaded RustDesk installer is unexpectedly small.' }
-if ($asset.digest -and $asset.digest -match '^sha256:(.+)$') {
-  $actual = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLowerInvariant()
-  $expected = $Matches[1].ToLowerInvariant()
-  if ($actual -ne $expected) { throw "RustDesk SHA256 mismatch. Expected $expected, got $actual." }
+
+$actual = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLowerInvariant()
+$expected = $Sha256.Trim().ToLowerInvariant()
+if ($actual -ne $expected) {
+  Remove-Item $target -Force -ErrorAction SilentlyContinue
+  throw "RustDesk SHA256 mismatch. Expected $expected, got $actual. Update the pinned artifact intentionally before shipping."
 }
 
-Write-Host "RustDesk $Version prepared at $target"
+Write-Host "RustDesk $Version prepared from pinned artifact: $target"
+
+if ($env:GITHUB_ACTIONS -eq 'true' -and $env:GITHUB_REF -eq 'refs/heads/main') {
+  & (Join-Path $PSScriptRoot 'verify-agent-service.ps1')
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}

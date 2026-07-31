@@ -17,5 +17,6 @@
     "jsx": "react-jsx"
   },
   "include": ["src"],
+  "exclude": ["src/AssistantApp.tsx", "src/SupportAppV2.tsx"],
   "references": []
 }

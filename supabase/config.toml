@@ -1,0 +1,4 @@
+project_id = "nexo-support"
+
+[functions.nexo-assistant]
+verify_jwt = false
