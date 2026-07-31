@@ -1,0 +1,54 @@
+name: Finalize agent consent
+
+on:
+  push:
+    branches: [feat/secure-ai-support-agent]
+    paths:
+      - '.github/workflows/patch-agent-consent.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/secure-ai-support-agent
+      - name: Patch consent state
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/SupportAppV6.tsx')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              "const inactiveConsent: UpdateConsentInput = {\n  assistantEnabled: false,\n  shareDiagnostics: false,\n  automaticChecks: false,\n  hardwareSensors: true,\n  elevatedSensors: false\n};",
+              "const pendingConsent: UpdateConsentInput = {\n  assistantEnabled: false,\n  shareDiagnostics: false,\n  automaticChecks: false,\n  hardwareSensors: false,\n  elevatedSensors: false\n};\n\nconst toolsConsent: UpdateConsentInput = {\n  assistantEnabled: true,\n  shareDiagnostics: false,\n  automaticChecks: false,\n  hardwareSensors: true,\n  elevatedSensors: false\n};"
+          )
+          text = text.replace(
+              "const consentResolved = Boolean(dashboard?.consent?.assistantEnabled || dashboard?.consent?.shareDiagnostics);",
+              "const consentResolved = Boolean(dashboard?.consent?.hardwareSensors);"
+          )
+          text = text.replace(
+              "await appBackend.saveConsents(registered.session.deviceToken, inactiveConsent);",
+              "await appBackend.saveConsents(registered.session.deviceToken, pendingConsent);"
+          )
+          text = text.replace(
+              "useAgent ? activeConsent : inactiveConsent",
+              "useAgent ? activeConsent : toolsConsent"
+          )
+          required = ['const pendingConsent', 'const toolsConsent', 'consent?.hardwareSensors', 'pendingConsent);', 'activeConsent : toolsConsent']
+          missing = [item for item in required if item not in text]
+          if missing:
+              raise SystemExit(f'Consent patch incomplete: {missing}')
+          path.write_text(text, encoding='utf-8')
+          PY
+          rm .github/workflows/patch-agent-consent.yml
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/SupportAppV6.tsx .github/workflows/patch-agent-consent.yml
+          git commit -m "fix: keep tools-only mode private and usable"
+          git push origin HEAD:feat/secure-ai-support-agent
