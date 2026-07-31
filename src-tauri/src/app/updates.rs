@@ -1,10 +1,11 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use tauri_plugin_updater::UpdaterExt;
 
 #[cfg(target_os = "windows")]
 use std::{
     env,
+    fs,
     os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::Command,
@@ -18,6 +19,13 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 pub struct AvailableUpdate {
     version: String,
     notes: Option<String>,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Deserialize, Serialize)]
+struct ActiveInstall {
+    path: String,
+    version: String,
 }
 
 fn version_parts(value: &str) -> Vec<u64> {
@@ -66,6 +74,13 @@ pub async fn check_app_update(app: AppHandle) -> Result<Option<AvailableUpdate>,
 }
 
 #[cfg(target_os = "windows")]
+fn active_install_marker() -> Option<PathBuf> {
+    env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .map(|root| root.join("NEXO Support").join("active-install.json"))
+}
+
+#[cfg(target_os = "windows")]
 fn canonical_install() -> Option<PathBuf> {
     ["ProgramW6432", "ProgramFiles"]
         .into_iter()
@@ -76,51 +91,166 @@ fn canonical_install() -> Option<PathBuf> {
 }
 
 #[cfg(target_os = "windows")]
+fn normalize(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+#[cfg(target_os = "windows")]
+fn read_active_install() -> Option<ActiveInstall> {
+    let marker = active_install_marker()?;
+    let text = fs::read_to_string(marker).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+#[cfg(target_os = "windows")]
+fn persist_active_install(path: &Path, version: &str) -> Result<(), String> {
+    let marker = active_install_marker().ok_or("No se encontró LOCALAPPDATA.")?;
+    let parent = marker.parent().ok_or("Ruta de instalación inválida.")?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let payload = ActiveInstall {
+        path: path.to_string_lossy().to_string(),
+        version: version.to_string(),
+    };
+    let json = serde_json::to_string(&payload).map_err(|error| error.to_string())?;
+    fs::write(marker, json).map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "windows")]
+pub fn redirect_to_active_install(current_version: &str) -> bool {
+    let Ok(current) = env::current_exe() else {
+        return false;
+    };
+    let Some(active) = read_active_install() else {
+        return false;
+    };
+    let target = PathBuf::from(&active.path);
+    if !target.is_file() || normalize(&current) == normalize(&target) {
+        return false;
+    }
+    if is_newer(current_version, &active.version) {
+        let _ = persist_active_install(&current, current_version);
+        return false;
+    }
+
+    Command::new(target)
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .is_ok()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn redirect_to_active_install(_current_version: &str) -> bool {
+    false
+}
+
+#[cfg(target_os = "windows")]
+pub fn register_current_install(current_version: &str) {
+    let Ok(current) = env::current_exe() else {
+        return;
+    };
+    match read_active_install() {
+        None => {
+            let _ = persist_active_install(&current, current_version);
+        }
+        Some(active) => {
+            let active_path = PathBuf::from(active.path);
+            if !active_path.is_file() || is_newer(current_version, &active.version) {
+                let _ = persist_active_install(&current, current_version);
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn register_current_install(_current_version: &str) {}
+
+#[cfg(target_os = "windows")]
+pub fn repair_stale_launchers(current_version: &str) {
+    let Ok(current) = env::current_exe() else {
+        return;
+    };
+    let Some(canonical) = canonical_install() else {
+        return;
+    };
+    if normalize(&current) != normalize(&canonical) {
+        return;
+    }
+
+    let _ = persist_active_install(&canonical, current_version);
+    let Some(local_app_data) = env::var_os("LOCALAPPDATA").map(PathBuf::from) else {
+        return;
+    };
+    let stale_copies = [
+        local_app_data
+            .join("Programs")
+            .join("NEXO Support")
+            .join("NEXO Support.exe"),
+        local_app_data
+            .join("NEXO Support")
+            .join("NEXO Support.exe"),
+    ];
+
+    for stale in stale_copies {
+        if !stale.is_file() || normalize(&stale) == normalize(&canonical) {
+            continue;
+        }
+        let backup = stale.with_extension("obsolete.exe");
+        let _ = fs::remove_file(&backup);
+        if fs::rename(&stale, &backup).is_ok() {
+            if fs::copy(&canonical, &stale).is_err() {
+                let _ = fs::rename(&backup, &stale);
+            }
+        } else {
+            let _ = fs::copy(&canonical, &stale);
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn repair_stale_launchers(_current_version: &str) {}
+
+#[cfg(target_os = "windows")]
 fn powershell_literal(path: &Path) -> String {
     path.to_string_lossy().replace('\'', "''")
 }
 
 #[cfg(target_os = "windows")]
-fn finish_windows_update(app: &AppHandle) -> Result<(), String> {
+fn finish_windows_update(app: &AppHandle, expected_version: &str) -> Result<(), String> {
     let current = env::current_exe().map_err(|error| error.to_string())?;
-    let Some(canonical) = canonical_install() else {
-        // Never restart the executable that initiated the update: it may be a stale
-        // per-user copy. Closing is safer than entering an endless update loop.
-        app.exit(0);
-        return Ok(());
-    };
+    let canonical = canonical_install().ok_or("No se encontró la instalación actualizada.")?;
+    persist_active_install(&canonical, expected_version)?;
 
-    let current_normalized = current.canonicalize().unwrap_or_else(|_| current.clone());
-    let canonical_normalized = canonical
-        .canonicalize()
-        .unwrap_or_else(|_| canonical.clone());
-
-    if current_normalized == canonical_normalized {
+    if normalize(&current) == normalize(&canonical) {
         app.restart();
     }
 
-    let old_directory = current.parent().unwrap_or(Path::new("")).to_path_buf();
-    let target = powershell_literal(&canonical);
-    let old = powershell_literal(&old_directory);
+    let current = powershell_literal(&current);
+    let canonical = powershell_literal(&canonical);
+    let marker = powershell_literal(
+        &active_install_marker().ok_or("No se encontró LOCALAPPDATA.")?,
+    );
+    let expected = expected_version.replace('\'', "''");
     let script = format!(
         "$ErrorActionPreference='SilentlyContinue'; \
-         Start-Sleep -Milliseconds 900; \
-         $target='{target}'; \
+         Start-Sleep -Milliseconds 1400; \
+         $source='{canonical}'; \
+         $old='{current}'; \
+         $marker='{marker}'; \
+         if((Test-Path -LiteralPath $source) -and $old -ne $source){{ \
+           Copy-Item -LiteralPath $source -Destination $old -Force \
+         }}; \
+         @{{path=$source;version='{expected}'}} | ConvertTo-Json -Compress | Set-Content -LiteralPath $marker -Encoding UTF8; \
          $shell=New-Object -ComObject WScript.Shell; \
-         $links=@(\
-           [Environment]::GetFolderPath('Desktop') + '\\NEXO Support.lnk', \
-           [Environment]::GetFolderPath('Programs') + '\\NEXO Support.lnk'\
-         ); \
-         foreach($link in $links){{ \
+         foreach($link in @(\
+           (Join-Path ([Environment]::GetFolderPath('Desktop')) 'NEXO Support.lnk'), \
+           (Join-Path ([Environment]::GetFolderPath('Programs')) 'NEXO Support.lnk')\
+         )){{ \
            $shortcut=$shell.CreateShortcut($link); \
-           $shortcut.TargetPath=$target; \
-           $shortcut.WorkingDirectory=Split-Path $target; \
+           $shortcut.TargetPath=$source; \
+           $shortcut.WorkingDirectory=Split-Path $source; \
            $shortcut.Save() \
          }}; \
-         Start-Process -FilePath $target; \
-         Start-Sleep -Seconds 2; \
-         $old='{old}'; \
-         if($old -and (Test-Path -LiteralPath $old)){{ Remove-Item -LiteralPath $old -Recurse -Force }}"
+         Start-Process -FilePath $source"
     );
 
     Command::new("powershell.exe")
@@ -135,7 +265,7 @@ fn finish_windows_update(app: &AppHandle) -> Result<(), String> {
         ])
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
-        .map_err(|error| format!("No se pudo abrir la instalación nueva: {error}"))?;
+        .map_err(|error| format!("No se pudo abrir la versión instalada: {error}"))?;
 
     app.exit(0);
     Ok(())
@@ -166,7 +296,7 @@ pub async fn install_app_update(
 
     #[cfg(target_os = "windows")]
     {
-        return finish_windows_update(&app);
+        return finish_windows_update(&app, &expected_version);
     }
 
     #[cfg(not(target_os = "windows"))]
