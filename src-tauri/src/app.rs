@@ -1,5 +1,6 @@
 mod actions;
 mod diagnostics;
+mod disk;
 mod optimizer;
 mod remote;
 mod sensors;
@@ -80,6 +81,7 @@ pub fn run() {
             windows::open_admin_window,
             windows::close_admin_window,
             diagnostics::run_quick_diagnostic,
+            disk::read_disk_health,
             sensors::read_hardware_sensors,
             optimizer::optimize_temp_files,
             actions::create_remote_session,
