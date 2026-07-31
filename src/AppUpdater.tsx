@@ -13,8 +13,7 @@ type UpdateState =
 
 type DismissedUpdate = { version: string; until: number };
 
-const CHECK_EVERY_MS = 60 * 1000;
-const UPDATE_CHECK_MULTIPLIER = 360;
+const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 const MIN_EVENT_GAP_MS = 30 * 1000;
 const SNOOZE_MS = 6 * 60 * 60 * 1000;
 
@@ -101,7 +100,7 @@ export default function AppUpdater() {
     if (!isTauriRuntime() || started.current) return;
     started.current = true;
     const first = window.setTimeout(() => void check(false), 8000);
-    const interval = window.setInterval(() => void check(false), CHECK_EVERY_MS * UPDATE_CHECK_MULTIPLIER);
+    const interval = window.setInterval(() => void check(false), CHECK_EVERY_MS);
     const online = () => void check(false);
     const manual = () => void check(true);
     window.addEventListener('online', online);
@@ -129,10 +128,8 @@ export default function AppUpdater() {
   }
 
   if (state.status === 'installing') {
-    const progress = 0;
     return (
-      <aside className="app-update-installing" role="status" aria-label="Instalando actualización" data-progress={Math.round(progress)}>
-        {/* Actualizando NEXO */}
+      <aside className="app-update-installing" role="status" aria-label="Instalando actualización">
         <UpdateMark size={30} />
         <div className="app-update-track"><i /></div>
       </aside>

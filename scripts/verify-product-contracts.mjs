@@ -102,7 +102,8 @@ requireMatch(deployAgent, /functions deploy nexo-assistant/, 'El agente debe des
 requireMatch(secureSql, /ticket_id[\s\S]*device_id = device_row\.id/, 'La sesión remota debe quedar ligada a su propia PC.');
 requireMatch(admin, /isSupportRunPayload/, 'Control debe leer reportes del agente.');
 requireMatch(admin, /managed_connect_remote_tool/, 'Control debe abrir la solicitud remota.');
-requireMatch(admin, /setInterval\(\(\) => void refresh\(true\), 5000\)/, 'Control debe actualizar solicitudes sin intervención.');
+requireMatch(admin, /setInterval\(poll, 15000\)/, 'Control debe actualizar solicitudes sin saturar el backend.');
+requireMatch(admin, /document\.visibilityState === 'visible'/, 'Control no debe consultar mientras está oculto.');
 
 requireMatch(windows, /monitor\.work_area\(\)/, 'La posición debe usar el área de trabajo y no tapar la barra de tareas.');
 requireMatch(windows, /work_size\.height[\s\S]*?size\.height/, 'La esquina inferior debe calcularse con el alto útil.');
@@ -148,10 +149,11 @@ requireMatch(app, /optimizer::optimize_temp_files/, 'El comando de optimización
 requireMatch(app, /remote::managed_connect_remote_tool/, 'El comando remoto seguro debe estar registrado.');
 requireMatch(evidence, /Memoria[\s\S]*?Disco[\s\S]*?Seguridad/, 'El estado general debe mostrar evidencia concreta.');
 
-requireMatch(updater, /const CHECK_EVERY_MS = 60 \* 1000/, 'NEXO debe buscar actualizaciones sin reiniciar.');
-requireMatch(updater, /Actualizando NEXO/, 'La actualización debe tener una etapa visual propia.');
-requireMatch(updater, /Math\.round\(progress\)/, 'El actualizador debe mostrar progreso.');
-requireMatch(updaterCss, /\.app-update-stage/, 'Falta la escena visual de actualización.');
+requireMatch(updater, /const CHECK_EVERY_MS = 6 \* 60 \* 60 \* 1000/, 'NEXO debe revisar actualizaciones sin consultar cada minuto.');
+requireMatch(updater, /app-update-installing/, 'La actualización debe tener un indicador propio.');
+forbidMatch(updater, /progressTimer|setProgress\(/, 'El actualizador no debe simular progreso con renders constantes.');
+requireMatch(updaterCss, /\.app-update-installing/, 'Falta el indicador compacto de actualización.');
+forbidMatch(updaterCss, /backdrop-filter/, 'El actualizador no debe aplicar blur de pantalla completa.');
 forbidMatch(updater, /release\.notes|Cambios incluidos|Cerrar NEXO/, 'El updater volvió a mostrar texto innecesario.');
 
 requireMatch(releaseWorkflow, /VITE_SUPABASE_URL/, 'El release debe recibir la URL del backend.');

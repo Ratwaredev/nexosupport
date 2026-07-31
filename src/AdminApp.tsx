@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import {
   ArrowUpRight,
@@ -34,6 +34,12 @@ type UserDraft = { fullName: string; email: string; plan: string; limit: string;
 const emptyDraft: UserDraft = { fullName: '', email: '', plan: 'basic', limit: '200', isStaff: false };
 const planName = (plan?: string | null) => plan === 'max' ? 'Max' : plan === 'pro' ? 'Pro' : 'Básico';
 
+function adminError(reason: unknown) {
+  const raw = reason instanceof Error ? reason.message : '';
+  if (/failed to fetch|network|load failed|connection|timeout|abort/i.test(raw)) return 'No hay conexión con NEXO Control.';
+  return raw || 'No se pudo completar.';
+}
+
 function NexoMark({ size = 25 }: { size?: number }) {
   const gradientId = `admin-nexo-${size}`;
   return (
@@ -56,14 +62,15 @@ export default function AdminApp() {
   const [view, setView] = useState<View>('users');
   const [selectedUserId, setSelectedUserId] = useState('');
   const [query, setQuery] = useState('');
-  const [email, setEmail] = useState(backendConfig.backendKind === 'local' ? backendConfig.localAdminEmail : '');
-  const [password, setPassword] = useState(backendConfig.backendKind === 'local' ? backendConfig.localAdminPassword : '');
+  const [email, setEmail] = useState(appBackend.kind === 'local' ? backendConfig.localAdminEmail : '');
+  const [password, setPassword] = useState(appBackend.kind === 'local' ? backendConfig.localAdminPassword : '');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [draft, setDraft] = useState<UserDraft>(emptyDraft);
   const [generatedCode, setGeneratedCode] = useState('');
+  const refreshing = useRef(false);
 
   useEffect(() => {
     void appBackend.bootstrap('admin').then(async (restored) => {
@@ -74,8 +81,10 @@ export default function AdminApp() {
 
   useEffect(() => {
     if (!session) return;
-    const timer = window.setInterval(() => void refresh(true), 5000);
-    return () => window.clearInterval(timer);
+    const poll = () => { if (document.visibilityState === 'visible') void refresh(true); };
+    const timer = window.setInterval(poll, 15000);
+    document.addEventListener('visibilitychange', poll);
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', poll); };
   }, [session]);
 
   const users = useMemo(() => {
@@ -106,6 +115,8 @@ export default function AdminApp() {
   }), [dashboard]);
 
   async function refresh(silent = false) {
+    if (refreshing.current) return;
+    refreshing.current = true;
     if (!silent) setBusy('Actualizando');
     try {
       const data = await appBackend.getAdminDashboard();
@@ -113,8 +124,9 @@ export default function AdminApp() {
       setSelectedUserId((current) => current || data.users[0]?.id || '');
       setError('');
     } catch (reason) {
-      if (!silent) setError(reason instanceof Error ? reason.message : 'No se pudo cargar NEXO Control.');
+      if (!silent) setError(adminError(reason));
     } finally {
+      refreshing.current = false;
       if (!silent) setBusy('');
     }
   }
@@ -128,7 +140,7 @@ export default function AdminApp() {
       setSession(result.session);
       await refresh();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'No se pudo iniciar sesión.');
+      setError(adminError(reason));
     } finally {
       setBusy('');
     }

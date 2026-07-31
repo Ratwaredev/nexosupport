@@ -261,9 +261,9 @@ export default function SupportAppV6() {
 
   useEffect(() => {
     if (view !== 'assistant') return;
-    const timer = window.setTimeout(() => thread.current?.scrollTo({ top: thread.current.scrollHeight, behavior: 'smooth' }), 20);
+    const timer = window.setTimeout(() => { if (thread.current) thread.current.scrollTop = thread.current.scrollHeight; }, 20);
     return () => window.clearTimeout(timer);
-  }, [messages, busy, pendingApproval, progress.percent, view]);
+  }, [messages.length, busy, pendingApproval, view]);
 
   async function activate(event: FormEvent) {
     event.preventDefault();
