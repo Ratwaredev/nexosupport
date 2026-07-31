@@ -4,6 +4,7 @@ import type { HardwareSnapshot, SensorSummary } from './sensors';
 
 export type AssistantToolId =
   | 'run_quick_diagnostic'
+  | 'disk_health'
   | 'network_check'
   | 'scan_temp_files'
   | 'startup_review'
@@ -25,7 +26,8 @@ export type ToolDefinition = {
 };
 
 export const TOOL_CATALOG: Record<AssistantToolId, ToolDefinition> = {
-  run_quick_diagnostic: { id: 'run_quick_diagnostic', label: 'Revisar esta PC', shortLabel: 'Revisión general', description: 'Lee RAM, disco, reinicio pendiente, seguridad e inicio. No modifica nada.', mode: 'read', progressLabel: 'Revisando PC' },
+  run_quick_diagnostic: { id: 'run_quick_diagnostic', label: 'Revisar esta PC', shortLabel: 'Revisión general', description: 'Lee RAM, espacio, reinicio pendiente, seguridad e inicio. No modifica nada.', mode: 'read', progressLabel: 'Revisando PC' },
+  disk_health: { id: 'disk_health', label: 'Revisar salud del disco', shortLabel: 'Salud del disco', description: 'Lee estado, medio, temperatura, desgaste y errores expuestos por Windows. No modifica nada.', mode: 'read', progressLabel: 'Revisando disco' },
   network_check: { id: 'network_check', label: 'Revisar Internet', shortLabel: 'Red', description: 'Comprueba adaptador, DNS, gateway y salida a Internet. No cambia la red.', mode: 'read', progressLabel: 'Revisando Internet' },
   scan_temp_files: { id: 'scan_temp_files', label: 'Analizar temporales', shortLabel: 'Temporales', description: 'Calcula el espacio recuperable en ubicaciones temporales permitidas. No borra nada.', mode: 'read', progressLabel: 'Analizando espacio' },
   startup_review: { id: 'startup_review', label: 'Revisar el inicio', shortLabel: 'Inicio', description: 'Lista programas que arrancan con Windows. No desactiva ninguno.', mode: 'read', progressLabel: 'Revisando inicio' },
@@ -108,6 +110,7 @@ function localFallback(messages: ProviderMessage[]): AssistantResponse {
   }
   const text = lastUserText(messages);
   if (/remoto|rustdesk|soporte|t[eé]cnico/.test(text)) return localToolCall('remote_support');
+  if (/disco al 100|disco lento|ruido|smart|ssd|hdd/.test(text)) return localToolCall('disk_health');
   if (/internet|wifi|wi-fi|red|dns|gateway/.test(text)) return localToolCall('network_check');
   if (/virus|seguridad|defender|malware|antivirus/.test(text)) return localToolCall('defender_status');
   if (/optimizar|espacio|disco lleno|basura|temporales|limpiar|liberar/.test(text)) return localToolCall('scan_temp_files');
