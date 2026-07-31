@@ -1,11 +1,13 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { installBackendErrorGuard } from './lib/backend-error-guard';
 import { ensureLocalOwnerWorkspace } from './lib/local-owner-bootstrap';
 
 const url = new URL(window.location.href);
 const isAdminView = url.pathname.endsWith('/admin.html') || url.searchParams.get('view') === 'admin';
 
 async function start() {
+  installBackendErrorGuard();
   ensureLocalOwnerWorkspace();
   const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
 
