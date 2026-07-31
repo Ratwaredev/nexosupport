@@ -81,7 +81,7 @@ const pendingConsent: UpdateConsentInput = {
 };
 
 const toolsConsent: UpdateConsentInput = {
-  assistantEnabled: true,
+  assistantEnabled: false,
   shareDiagnostics: false,
   automaticChecks: false,
   hardwareSensors: true,
