@@ -72,8 +72,16 @@ type PendingApproval = {
   depth: number;
 };
 
-const inactiveConsent: UpdateConsentInput = {
+const pendingConsent: UpdateConsentInput = {
   assistantEnabled: false,
+  shareDiagnostics: false,
+  automaticChecks: false,
+  hardwareSensors: false,
+  elevatedSensors: false
+};
+
+const toolsConsent: UpdateConsentInput = {
+  assistantEnabled: true,
   shareDiagnostics: false,
   automaticChecks: false,
   hardwareSensors: true,
@@ -195,7 +203,7 @@ export default function SupportAppV6() {
 
   const device = dashboard?.device ?? null;
   const active = Boolean(session?.deviceToken && device);
-  const consentResolved = Boolean(dashboard?.consent?.assistantEnabled || dashboard?.consent?.shareDiagnostics);
+  const consentResolved = Boolean(dashboard?.consent?.hardwareSensors);
   const assistantEnabled = Boolean(dashboard?.consent?.assistantEnabled && dashboard?.consent?.shareDiagnostics);
   const hardwareSummary = useMemo(() => hardware ? summarizeHardware(hardware) : null, [hardware]);
 
@@ -275,7 +283,7 @@ export default function SupportAppV6() {
         platform: 'windows'
       });
       if (!registered.session.deviceToken) throw new Error('No se creó la conexión.');
-      await appBackend.saveConsents(registered.session.deviceToken, inactiveConsent);
+      await appBackend.saveConsents(registered.session.deviceToken, pendingConsent);
       const data = await appBackend.getClientDashboard(registered.session.deviceToken);
       setSession(registered.session);
       setDashboard(data);
@@ -291,7 +299,7 @@ export default function SupportAppV6() {
     if (!session?.deviceToken) return;
     setBusy('Guardando');
     try {
-      const consent = await appBackend.saveConsents(session.deviceToken, useAgent ? activeConsent : inactiveConsent);
+      const consent = await appBackend.saveConsents(session.deviceToken, useAgent ? activeConsent : toolsConsent);
       setDashboard((current) => current ? { ...current, consent } : current);
       setView(useAgent ? 'assistant' : 'tools');
       setNotice({ tone: 'success', text: useAgent ? 'Agente activo.' : 'Herramientas listas.' });
