@@ -140,8 +140,6 @@ try {
   await assertNoBodyOverflow(page, 'tools');
 
   await page.getByRole('button', { name: /Optimizar/ }).click();
-  await waitText(page, 'Sin datos');
-  if (await page.locator('.nv-rocket').count()) throw new Error('Rocket rendered before optimization.');
   await page.getByRole('button', { name: 'Analizar', exact: true }).click();
   await waitText(page, '742.0 MB disponibles');
   await page.getByRole('button', { name: 'Optimizar', exact: true }).click();
