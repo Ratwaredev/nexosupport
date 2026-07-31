@@ -88,6 +88,7 @@ pub fn run() {
             remote::managed_remote_tool_status,
             remote::managed_install_remote_tool,
             remote::managed_open_remote_tool,
+            remote::managed_connect_remote_tool,
             updates::check_app_update,
             updates::install_app_update
         ])
