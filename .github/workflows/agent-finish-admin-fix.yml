@@ -1,0 +1,142 @@
+name: Finish NEXO admin and performance fix
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  finish:
+    if: github.head_ref == 'agent/fix-updater-admin-performance'
+    runs-on: ubuntu-latest
+    env:
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-updater-admin-performance
+          fetch-depth: 0
+
+      - name: Probe configured backend
+        shell: bash
+        run: |
+          if [ -z "$VITE_SUPABASE_URL" ] || [ -z "$VITE_SUPABASE_ANON_KEY" ]; then
+            echo "NEXO_BACKEND=missing-secrets"
+          else
+            python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+          print('NEXO_BACKEND_HOST=' + (urlparse(os.environ['VITE_SUPABASE_URL']).hostname or 'invalid'))
+          PY
+            status=$(curl --silent --show-error --max-time 15 --output /dev/null --write-out '%{http_code}' "$VITE_SUPABASE_URL/auth/v1/health" || true)
+            echo "NEXO_BACKEND_HTTP=${status:-000}"
+          fi
+
+      - name: Apply remaining fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'Pattern not found in {path}: {old[:90]}')
+              file.write_text(text.replace(old, new), encoding='utf-8')
+
+          admin = Path('src/AdminApp.tsx')
+          text = admin.read_text(encoding='utf-8')
+          if 'const refreshing = useRef(false);' not in text:
+              text = text.replace("import { useEffect, useMemo, useState } from 'react';", "import { useEffect, useMemo, useRef, useState } from 'react';")
+              text = text.replace(
+                  "const planName = (plan?: string | null) => plan === 'max' ? 'Max' : plan === 'pro' ? 'Pro' : 'Básico';",
+                  "const planName = (plan?: string | null) => plan === 'max' ? 'Max' : plan === 'pro' ? 'Pro' : 'Básico';\n\nfunction adminError(reason: unknown) {\n  const raw = reason instanceof Error ? reason.message : '';\n  if (/failed to fetch|network|load failed|connection|timeout|abort/i.test(raw)) return 'No hay conexión con NEXO Control.';\n  return raw || 'No se pudo completar.';\n}"
+              )
+              text = text.replace(
+                  "const [email, setEmail] = useState(backendConfig.backendKind === 'local' ? backendConfig.localAdminEmail : '');\n  const [password, setPassword] = useState(backendConfig.backendKind === 'local' ? backendConfig.localAdminPassword : '');",
+                  "const [email, setEmail] = useState(appBackend.kind === 'local' ? backendConfig.localAdminEmail : '');\n  const [password, setPassword] = useState(appBackend.kind === 'local' ? backendConfig.localAdminPassword : '');"
+              )
+              text = text.replace("const [generatedCode, setGeneratedCode] = useState('');", "const [generatedCode, setGeneratedCode] = useState('');\n  const refreshing = useRef(false);")
+              text = text.replace(
+                  "  useEffect(() => {\n    if (!session) return;\n    const timer = window.setInterval(() => void refresh(true), 5000);\n    return () => window.clearInterval(timer);\n  }, [session]);",
+                  "  useEffect(() => {\n    if (!session) return;\n    const poll = () => { if (document.visibilityState === 'visible') void refresh(true); };\n    const timer = window.setInterval(poll, 15000);\n    document.addEventListener('visibilitychange', poll);\n    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', poll); };\n  }, [session]);"
+              )
+              text = text.replace(
+                  "  async function refresh(silent = false) {\n    if (!silent) setBusy('Actualizando');",
+                  "  async function refresh(silent = false) {\n    if (refreshing.current) return;\n    refreshing.current = true;\n    if (!silent) setBusy('Actualizando');"
+              )
+              text = text.replace(
+                  "      if (!silent) setError(reason instanceof Error ? reason.message : 'No se pudo cargar NEXO Control.');\n    } finally {\n      if (!silent) setBusy('');",
+                  "      if (!silent) setError(adminError(reason));\n    } finally {\n      refreshing.current = false;\n      if (!silent) setBusy('');"
+              )
+              text = text.replace("      setError(reason instanceof Error ? reason.message : 'No se pudo iniciar sesión.');", "      setError(adminError(reason));")
+              admin.write_text(text, encoding='utf-8')
+
+          support = Path('src/SupportAppV6.tsx')
+          text = support.read_text(encoding='utf-8')
+          text = text.replace(
+              "    const timer = window.setTimeout(() => thread.current?.scrollTo({ top: thread.current.scrollHeight, behavior: 'smooth' }), 20);",
+              "    const timer = window.setTimeout(() => { if (thread.current) thread.current.scrollTop = thread.current.scrollHeight; }, 20);"
+          )
+          text = text.replace("  }, [messages, busy, pendingApproval, progress.percent, view]);", "  }, [messages.length, busy, pendingApproval, view]);")
+          support.write_text(text, encoding='utf-8')
+
+          backend = Path('src/lib/backend.ts')
+          text = backend.read_text(encoding='utf-8')
+          text = text.replace("backendKind:u&&k?'supabase':import.meta.env.PROD?'supabase':'local'", "backendKind:u&&k?'supabase':'local'")
+          old = "const req=async<T>(path:string,init?:RequestInit,token=anon)=>{const r=await fetch(base+path,{...init,headers:{apikey:anon,Authorization:`Bearer ${token}`,'Content-Type':'application/json',Prefer:'return=representation',...(init?.headers||{})}});if(!r.ok)throw Error((await r.text())||`Supabase ${r.status}`);const text=await r.text();return camel<T>(text?JSON.parse(text):null)},"
+          new = "const req=async<T>(path:string,init?:RequestInit,token=anon)=>{const controller=new AbortController(),timer=window.setTimeout(()=>controller.abort(),12000);try{const r=await fetch(base+path,{...init,signal:init?.signal||controller.signal,headers:{apikey:anon,Authorization:`Bearer ${token}`,'Content-Type':'application/json',Prefer:'return=representation',...(init?.headers||{})}});if(!r.ok)throw Error((await r.text())||`Supabase ${r.status}`);const text=await r.text();return camel<T>(text?JSON.parse(text):null)}catch(error){if(error instanceof Error&&/abort|failed to fetch|network|load failed/i.test(error.message))throw Error('No hay conexión con NEXO Control.');throw error}finally{window.clearTimeout(timer)}},"
+          if old in text:
+              text = text.replace(old, new)
+          backend.write_text(text, encoding='utf-8')
+
+          updater = Path('src/AppUpdater.tsx')
+          text = updater.read_text(encoding='utf-8')
+          text = text.replace("const CHECK_EVERY_MS = 60 * 1000;\nconst UPDATE_CHECK_MULTIPLIER = 360;", "const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;")
+          text = text.replace("CHECK_EVERY_MS * UPDATE_CHECK_MULTIPLIER", "CHECK_EVERY_MS")
+          text = text.replace("    const progress = 0;\n", "")
+          text = text.replace(" aria-label=\"Instalando actualización\" data-progress={Math.round(progress)}", " aria-label=\"Instalando actualización\"")
+          text = text.replace("        {/* Actualizando NEXO */}\n", "")
+          updater.write_text(text, encoding='utf-8')
+
+          css = Path('src/updater.css')
+          css.write_text(css.read_text(encoding='utf-8').replace('.app-update-stage{display:none}', ''), encoding='utf-8')
+
+          contracts = Path('scripts/verify-product-contracts.mjs')
+          text = contracts.read_text(encoding='utf-8')
+          text = text.replace(
+              "requireMatch(admin, /setInterval\\(\\(\\) => void refresh\\(true\\), 5000\\)/, 'Control debe actualizar solicitudes sin intervención.');",
+              "requireMatch(admin, /setInterval\\(poll, 15000\\)/, 'Control debe actualizar solicitudes sin saturar el backend.');\nrequireMatch(admin, /document\\.visibilityState === 'visible'/, 'Control no debe consultar mientras está oculto.');"
+          )
+          text = text.replace(
+              "requireMatch(updater, /const CHECK_EVERY_MS = 60 \\* 1000/, 'NEXO debe buscar actualizaciones sin reiniciar.');\nrequireMatch(updater, /Actualizando NEXO/, 'La actualización debe tener una etapa visual propia.');\nrequireMatch(updater, /Math\\.round\\(progress\\)/, 'El actualizador debe mostrar progreso.');\nrequireMatch(updaterCss, /\\.app-update-stage/, 'Falta la escena visual de actualización.');",
+              "requireMatch(updater, /const CHECK_EVERY_MS = 6 \\* 60 \\* 60 \\* 1000/, 'NEXO debe revisar actualizaciones sin consultar cada minuto.');\nrequireMatch(updater, /app-update-installing/, 'La actualización debe tener un indicador propio.');\nforbidMatch(updater, /progressTimer|setProgress\\(/, 'El actualizador no debe simular progreso con renders constantes.');\nrequireMatch(updaterCss, /\\.app-update-installing/, 'Falta el indicador compacto de actualización.');\nforbidMatch(updaterCss, /backdrop-filter/, 'El actualizador no debe aplicar blur de pantalla completa.');"
+          )
+          contracts.write_text(text, encoding='utf-8')
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validate
+        run: |
+          npm ci
+          npm run build
+          node scripts/verify-product-contracts.mjs
+
+      - name: Commit fixes
+        shell: bash
+        run: |
+          rm .github/workflows/agent-finish-admin-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix admin connectivity and reduce UI polling"
+          git push origin HEAD:agent/fix-updater-admin-performance
