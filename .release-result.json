@@ -1,37 +1,37 @@
 {
-  "version": "0.4.54",
+  "version": "0.4.56",
   "status": "success",
-  "runId": "30657837101",
-  "commit": "15d99254c5081621d61023f56d56f8d1639c45c7",
-  "releaseUrl": "https://github.com/Ratwaredev/underdocksoporteapp/releases/tag/v0.4.54",
+  "runId": "30658131470",
+  "commit": "a451ea7498cb750cdcf22c13ea02ee1e41018e85",
+  "releaseUrl": "https://github.com/Ratwaredev/underdocksoporteapp/releases/tag/v0.4.56",
   "updaterPlatform": "windows-x86_64-nsis",
   "updaterProbe": {
     "ok": true,
-    "manifestUrl": "https://github.com/Ratwaredev/underdocksoporteapp/releases/download/v0.4.54/latest.json",
-    "expectedVersion": "0.4.54",
-    "version": "0.4.54",
+    "manifestUrl": "https://github.com/Ratwaredev/underdocksoporteapp/releases/download/v0.4.56/latest.json",
+    "expectedVersion": "0.4.56",
+    "version": "0.4.56",
     "platform": "windows-x86_64-nsis",
-    "assetUrl": "https://github.com/Ratwaredev/underdocksoporteapp/releases/download/v0.4.54/NEXO.Support_0.4.54_x64-setup.exe",
+    "assetUrl": "https://github.com/Ratwaredev/underdocksoporteapp/releases/download/v0.4.56/NEXO.Support_0.4.56_x64-setup.exe",
     "signatureLength": 424,
-    "assetBytes": 53120625,
+    "assetBytes": 53132793,
     "error": null,
-    "checkedAt": "2026-07-31T19:15:43.0203823Z",
+    "checkedAt": "2026-07-31T19:24:09.9067855Z",
     "manifest": {
-      "version": "0.4.54",
+      "version": "0.4.56",
       "notes": "Actualización de soporte de escritorio.\n\n- Ventana ubicada sobre la barra de tareas y restaurada abajo a la derecha.\n- Herramientas simples, sin textos repetidos ni estados decorativos.\n- Optimización con progreso real de 0 a 100 y una sola nave durante la limpieza.\n- RustDesk incluido e instalado junto con NEXO para dejar el soporte remoto listo.\n- ID remoto asociado a la solicitud visible en Administración cuando el backend está conectado.\n- Nuevo icono transparente y actualizador visual más limpio.",
-      "pub_date": "2026-07-31T19:15:38.948Z",
+      "pub_date": "2026-07-31T19:24:07.284Z",
       "platforms": {
         "windows-x86_64": {
-          "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNmRLdjZsRGxEam4wTTBHcTZ6dE1aTVYzREtXancveVVLbEFFYWlTVnVrNXFtNU5nNEs5dm85UmpmT2h6VUhDeHhVVkFydTFwNnRBOTUyRHVrR1BHa3JNK2lyYlQ4S0FVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1NTI1MzM0CWZpbGU6TkVYTyBTdXBwb3J0XzAuNC41NF94NjQtc2V0dXAuZXhlCmhEYktKbU9tL3drdlJWQ252QTBXNG90VjY0V3dwRmo1eDdsdHdDTHhJTDNCUHlDUEJiMGpYTVE0b3J0UERhUlEydTRqV0pRa3BWQU9yalBWNnc1S0FBPT0K",
-          "url": "https://github.com/Ratwaredev/underdocksoporteapp/releases/download/v0.4.54/NEXO.Support_0.4.54_x64-setup.exe"
+          "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNmRLdjZsRGxEanZSZVd1VXJmWVFxREJ5MVpkUVJDTTBPMVQ4b3FoZUFaNERtZ2xSTGxNbFh0enNDNU1zMUk0eG9oQUlsTU1JU09CNEJVSXlPVTJuVHowVmFManM5SXdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1NTI1ODQzCWZpbGU6TkVYTyBTdXBwb3J0XzAuNC41Nl94NjQtc2V0dXAuZXhlCm9nUjdEUmRQUjU4c1hyY080QmRLc1o2NlJyZmlaSXlqQTZPeFRhQ3JYb0tkWEpFU0VEM01FUUVrLzZQSVhYOGorbEI3SUNJZnlLMFY1ZEVCUi9LeEJ3PT0K",
+          "url": "https://github.com/Ratwaredev/underdocksoporteapp/releases/download/v0.4.56/NEXO.Support_0.4.56_x64-setup.exe"
         },
         "windows-x86_64-nsis": {
-          "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNmRLdjZsRGxEam4wTTBHcTZ6dE1aTVYzREtXancveVVLbEFFYWlTVnVrNXFtNU5nNEs5dm85UmpmT2h6VUhDeHhVVkFydTFwNnRBOTUyRHVrR1BHa3JNK2lyYlQ4S0FVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1NTI1MzM0CWZpbGU6TkVYTyBTdXBwb3J0XzAuNC41NF94NjQtc2V0dXAuZXhlCmhEYktKbU9tL3drdlJWQ252QTBXNG90VjY0V3dwRmo1eDdsdHdDTHhJTDNCUHlDUEJiMGpYTVE0b3J0UERhUlEydTRqV0pRa3BWQU9yalBWNnc1S0FBPT0K",
-          "url": "https://github.com/Ratwaredev/underdocksoporteapp/releases/download/v0.4.54/NEXO.Support_0.4.54_x64-setup.exe"
+          "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNmRLdjZsRGxEanZSZVd1VXJmWVFxREJ5MVpkUVJDTTBPMVQ4b3FoZUFaNERtZ2xSTGxNbFh0enNDNU1zMUk0eG9oQUlsTU1JU09CNEJVSXlPVTJuVHowVmFManM5SXdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1NTI1ODQzCWZpbGU6TkVYTyBTdXBwb3J0XzAuNC41Nl94NjQtc2V0dXAuZXhlCm9nUjdEUmRQUjU4c1hyY080QmRLc1o2NlJyZmlaSXlqQTZPeFRhQ3JYb0tkWEpFU0VEM01FUUVrLzZQSVhYOGorbEI3SUNJZnlLMFY1ZEVCUi9LeEJ3PT0K",
+          "url": "https://github.com/Ratwaredev/underdocksoporteapp/releases/download/v0.4.56/NEXO.Support_0.4.56_x64-setup.exe"
         }
       }
     }
   },
   "runtimeMode": "connected",
-  "recordedAt": "2026-07-31T19:15:43.703Z"
+  "recordedAt": "2026-07-31T19:24:10.353Z"
 }
