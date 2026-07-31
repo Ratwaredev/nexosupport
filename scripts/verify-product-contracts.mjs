@@ -105,7 +105,9 @@ requireMatch(admin, /managed_connect_remote_tool/, 'Control debe abrir la solici
 requireMatch(admin, /clearAdminSession[\s\S]*STORAGE_KEYS\.adminSession/, 'Control debe exigir una sesión nueva al abrir Administración.');
 requireMatch(admin, /recoverAccess[\s\S]*auth\/v1\/recover/, 'Control debe permitir recuperar el acceso.');
 requireMatch(admin, /deviceCountByUser/, 'Control debe evitar cálculos repetidos por usuario.');
+requireMatch(admin, /invalid_credentials/, 'Control debe mostrar errores de acceso legibles.');
 requireMatch(admin, /admin-loading/, 'Control debe mostrar una carga aislada antes del panel.');
+requireMatch(await readFile('src/lib/backend.ts', 'utf8'), /optionalSelect/, 'Control debe tolerar módulos faltantes sin romper la ventana.');
 forbidMatch(admin, /setInterval\(poll/, 'Control no debe consultar la base continuamente.');
 requireMatch(updater + admin, /sessionStorage/, 'La sesión administrativa debe vivir sólo durante la ventana.');
 

@@ -38,6 +38,9 @@ const planName = (plan?: string | null) => plan === 'max' ? 'Max' : plan === 'pr
 function adminError(reason: unknown) {
   const raw = reason instanceof Error ? reason.message : '';
   if (/failed to fetch|network|load failed|connection|timeout|abort/i.test(raw)) return 'No hay conexión con NEXO Control.';
+  if (/invalid_credentials|invalid login credentials/i.test(raw)) return 'Correo o contraseña incorrectos.';
+  if (/PGRST205|schema cache|Could not find the table/i.test(raw)) return 'La base de NEXO está incompleta. El acceso fue validado, pero faltan módulos.';
+  if (/Sin acceso administrativo/i.test(raw)) return 'Esta cuenta no tiene permiso de administrador.';
   return raw || 'No se pudo completar.';
 }
 
