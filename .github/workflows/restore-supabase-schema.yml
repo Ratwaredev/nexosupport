@@ -1,0 +1,139 @@
+name: Restore current NEXO schema
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-supabase-schema.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nexo-schema-restore
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Supabase management secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${SUPABASE_ACCESS_TOKEN:-}" || { echo 'Missing SUPABASE_ACCESS_TOKEN'; exit 1; }
+          test -n "${SUPABASE_PROJECT_REF:-}" || { echo 'Missing SUPABASE_PROJECT_REF'; exit 1; }
+
+      - name: Apply restored product schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' > "$RUNNER_TEMP/nexo-restore-schema.json"
+          import json
+          from pathlib import Path
+
+          files = [
+              Path('infra/supabase/nexo-assistant.sql'),
+              Path('infra/supabase/secure-agent.sql'),
+          ]
+          query = '\n\n'.join(path.read_text(encoding='utf-8') for path in files)
+          print(json.dumps({'query': query, 'read_only': False}))
+          PY
+
+          curl --fail-with-body --silent --show-error \
+            -X POST "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/database/query" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data-binary "@$RUNNER_TEMP/nexo-restore-schema.json"
+
+          rm -f "$RUNNER_TEMP/nexo-restore-schema.json"
+
+      - name: Validate restored schema and administrator
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' > "$RUNNER_TEMP/nexo-verify-schema.json"
+          import json
+
+          query = r'''
+          do $$
+          begin
+            if to_regclass('public.admin_users') is null then raise exception 'missing admin_users'; end if;
+            if to_regclass('public.support_users') is null then raise exception 'missing support_users'; end if;
+            if to_regclass('public.devices') is null then raise exception 'missing devices'; end if;
+            if to_regclass('public.device_entitlements') is null then raise exception 'missing device_entitlements'; end if;
+            if to_regclass('public.device_consents') is null then raise exception 'missing device_consents'; end if;
+            if to_regclass('public.tickets') is null then raise exception 'missing tickets'; end if;
+            if to_regclass('public.diagnostics') is null then raise exception 'missing diagnostics'; end if;
+            if to_regclass('public.sessions') is null then raise exception 'missing sessions'; end if;
+            if to_regclass('public.releases') is null then raise exception 'missing releases'; end if;
+            if to_regclass('public.pairing_codes') is null then raise exception 'missing pairing_codes'; end if;
+
+            if to_regprocedure('public.generate_user_pairing_code(uuid)') is null then raise exception 'missing generate_user_pairing_code'; end if;
+            if to_regprocedure('public.register_device(text,text,text,text,text,text)') is null then raise exception 'missing register_device'; end if;
+            if to_regprocedure('public.set_device_consents(text,boolean,boolean,boolean,boolean,boolean)') is null then raise exception 'missing set_device_consents'; end if;
+            if to_regprocedure('public.get_client_dashboard(text)') is null then raise exception 'missing get_client_dashboard'; end if;
+            if to_regprocedure('public.create_remote_session(text,text)') is null then raise exception 'missing create_remote_session'; end if;
+
+            if not exists (select 1 from public.admin_users) then raise exception 'no administrator in admin_users'; end if;
+          end
+          $$;
+
+          select json_build_object(
+            'admins', (select count(*) from public.admin_users),
+            'support_users', (select count(*) from public.support_users),
+            'devices', (select count(*) from public.devices)
+          ) as nexo_restore;
+          '''
+          print(json.dumps({'query': query, 'read_only': False}))
+          PY
+
+          curl --fail-with-body --silent --show-error \
+            -X POST "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/database/query" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data-binary "@$RUNNER_TEMP/nexo-verify-schema.json" \
+            | tee "$RUNNER_TEMP/nexo-schema-result.json"
+
+          rm -f "$RUNNER_TEMP/nexo-verify-schema.json"
+
+      - name: Record schema restore status
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          SCHEMA_STATUS: ${{ job.status }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const branch = 'release-status';
+            const path = '.schema-result.json';
+            let sha;
+            try {
+              const current = await github.rest.repos.getContent({ owner, repo, path, ref: branch });
+              if (!Array.isArray(current.data)) sha = current.data.sha;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            const payload = {
+              status: process.env.SCHEMA_STATUS,
+              runId: String(context.runId),
+              commit: context.sha,
+              checkedAt: new Date().toISOString()
+            };
+            await github.rest.repos.createOrUpdateFileContents({
+              owner,
+              repo,
+              path,
+              branch,
+              sha,
+              message: `schema: ${payload.status}`,
+              content: Buffer.from(`${JSON.stringify(payload, null, 2)}\n`).toString('base64')
+            });
