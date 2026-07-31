@@ -35,6 +35,7 @@ Las sesiones de usuario y administrador son independientes.
 ### Lectura
 
 - diagnóstico general;
+- salud, temperatura, desgaste y errores del disco expuestos por Windows;
 - sensores de hardware;
 - conexión y DNS;
 - temporales recuperables;
