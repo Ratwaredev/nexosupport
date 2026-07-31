@@ -6,6 +6,7 @@ on:
     paths:
       - 'supabase/functions/nexo-assistant/**'
       - 'supabase/config.toml'
+      - 'infra/supabase/secure-agent.sql'
       - '.github/workflows/deploy-agent.yml'
   workflow_dispatch:
 
@@ -42,6 +43,21 @@ jobs:
         with:
           version: latest
           github-token: ${{ github.token }}
+
+      - name: Apply security migration
+        shell: bash
+        run: |
+          python - <<'PY' > "$RUNNER_TEMP/nexo-sql.json"
+          import json
+          from pathlib import Path
+          print(json.dumps({"query": Path("infra/supabase/secure-agent.sql").read_text(encoding="utf-8"), "read_only": False}))
+          PY
+          curl --fail-with-body --silent --show-error \
+            -X POST "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_REF/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary "@$RUNNER_TEMP/nexo-sql.json"
+          rm -f "$RUNNER_TEMP/nexo-sql.json"
 
       - name: Configure server secrets
         shell: bash
