@@ -116,7 +116,7 @@ try {
   await page.getByRole('button', { name: 'Conectar', exact: true }).click();
   await waitText(page, 'Elegí cómo usar NEXO');
   await page.screenshot({ path: 'artifacts/ui/support-consent.png' });
-  await page.getByRole('button', { name: /Agente/ }).click();
+  await page.getByRole('button', { name: /Revisión guiada/ }).click();
   await waitText(page, '¿Qué pasa con la PC?');
   await assertNoBodyOverflow(page, 'assistant');
 

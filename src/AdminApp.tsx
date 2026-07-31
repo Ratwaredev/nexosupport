@@ -3,7 +3,6 @@ import type { FormEvent } from 'react';
 import {
   ArrowUpRight,
   Check,
-  ChevronDown,
   ChevronRight,
   CircleAlert,
   ClipboardCheck,
@@ -17,7 +16,6 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
-  SlidersHorizontal,
   UserRound,
   UsersRound,
   X
@@ -64,7 +62,6 @@ export default function AdminApp() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [showCreate, setShowCreate] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [draft, setDraft] = useState<UserDraft>(emptyDraft);
   const [generatedCode, setGeneratedCode] = useState('');
 
@@ -116,7 +113,7 @@ export default function AdminApp() {
       setSelectedUserId((current) => current || data.users[0]?.id || '');
       setError('');
     } catch (reason) {
-      if (!silent) setError(reason instanceof Error ? reason.message : 'No pude cargar NEXO Control.');
+      if (!silent) setError(reason instanceof Error ? reason.message : 'No se pudo cargar NEXO Control.');
     } finally {
       if (!silent) setBusy('');
     }
@@ -131,7 +128,7 @@ export default function AdminApp() {
       setSession(result.session);
       await refresh();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'No pude iniciar sesión.');
+      setError(reason instanceof Error ? reason.message : 'No se pudo iniciar sesión.');
     } finally {
       setBusy('');
     }
@@ -162,11 +159,10 @@ export default function AdminApp() {
       setSelectedUserId(user.id);
       setGeneratedCode(pairing.code);
       setDraft(emptyDraft);
-      setShowAdvanced(false);
       setShowCreate(false);
       setNotice(`Código ${pairing.code} copiado.`);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'No pude crear el usuario.');
+      setError(reason instanceof Error ? reason.message : 'No se pudo crear el usuario.');
     } finally {
       setBusy('');
     }
@@ -180,7 +176,7 @@ export default function AdminApp() {
       await refresh();
       setNotice('Guardado.');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'No pude guardar los cambios.');
+      setError(reason instanceof Error ? reason.message : 'No se pudieron guardar los cambios.');
     } finally {
       setBusy('');
     }
@@ -196,7 +192,7 @@ export default function AdminApp() {
       setNotice('Código copiado. Vence en 30 minutos.');
       await refresh();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'No pude generar el código.');
+      setError(reason instanceof Error ? reason.message : 'No se pudo generar el código.');
     } finally {
       setBusy('');
     }
@@ -215,7 +211,7 @@ export default function AdminApp() {
       await refresh();
       setNotice('Plan actualizado.');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'No pude actualizar el plan.');
+      setError(reason instanceof Error ? reason.message : 'No se pudo actualizar el plan.');
     } finally {
       setBusy('');
     }
@@ -227,11 +223,11 @@ export default function AdminApp() {
       else await navigator.clipboard?.writeText(remoteId);
       setNotice(isTauriRuntime() ? 'RustDesk abierto.' : 'ID copiado.');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'No pude abrir RustDesk.');
+      setError(reason instanceof Error ? reason.message : 'No se pudo abrir RustDesk.');
     }
   }
 
-  const showAssistant = () => isTauriRuntime() ? safeInvoke('show_main_window') : Promise.resolve();
+  const showSupport = () => isTauriRuntime() ? safeInvoke('show_main_window') : Promise.resolve();
   const closeAdmin = () => isTauriRuntime() ? safeInvoke('close_admin_window') : Promise.resolve();
 
   if (!session) {
@@ -262,7 +258,7 @@ export default function AdminApp() {
           <button className={view === 'requests' ? 'active' : ''} onClick={() => setView('requests')}><Headphones size={18} /><span>Soporte</span><b>{stats.openRequests + reportsCount}</b></button>
         </nav>
         <div className="sidebar-bottom">
-          <button onClick={() => void showAssistant()}><ArrowUpRight size={17} /> Abrir asistente</button>
+          <button onClick={() => void showSupport()}><ArrowUpRight size={17} /> Abrir NEXO</button>
           <button onClick={() => void logout()}><LogOut size={17} /> Cerrar sesión</button>
         </div>
       </aside>
@@ -297,7 +293,7 @@ export default function AdminApp() {
                 {users.map((user) => {
                   const count = (dashboard?.devices ?? []).filter((device) => device.supportUserId === user.id).length;
                   return (
-                    <button key={user.id} className={selectedUser?.id === user.id ? 'selected' : ''} onClick={() => { setSelectedUserId(user.id); setGeneratedCode(''); setShowAdvanced(false); }}>
+                    <button key={user.id} className={selectedUser?.id === user.id ? 'selected' : ''} onClick={() => { setSelectedUserId(user.id); setGeneratedCode(''); }}>
                       <span className="user-avatar">{user.fullName.slice(0, 1).toUpperCase()}</span>
                       <span><b>{user.fullName}</b><small>{user.email || 'Sin correo'} · {count} equipo{count === 1 ? '' : 's'}</small></span>
                       <i className={user.status} />
@@ -329,15 +325,8 @@ export default function AdminApp() {
                     <div className="section-heading"><div><span>Acceso</span></div></div>
                     <div className="detail-grid">
                       <label><span>Plan</span><select value={selectedUser.defaultPlan} onChange={(event) => void updateUser({ defaultPlan: event.target.value })}><option value="basic">Básico</option><option value="pro">Pro</option><option value="max">Max</option></select></label>
-                      <label><span>Límite mensual</span><input key={`${selectedUser.id}-limit`} type="number" defaultValue={selectedUser.monthlyMessageLimit ?? ''} placeholder="Sin límite" onBlur={(event) => void updateUser({ monthlyMessageLimit: event.target.value ? Number(event.target.value) : null })} /></label>
+                      <label><span>Revisiones por mes</span><input key={`${selectedUser.id}-limit`} type="number" defaultValue={selectedUser.monthlyMessageLimit ?? ''} placeholder="Sin límite" onBlur={(event) => void updateUser({ monthlyMessageLimit: event.target.value ? Number(event.target.value) : null })} /></label>
                     </div>
-                    <button className="advanced-toggle" onClick={() => setShowAdvanced((value) => !value)}><SlidersHorizontal size={15} /> Avanzado <ChevronDown className={showAdvanced ? 'open' : ''} size={15} /></button>
-                    {showAdvanced && (
-                      <div className="advanced-panel">
-                        <label><span>Modelo <small>opcional</small></span><input key={`${selectedUser.id}-model`} defaultValue={selectedUser.defaultModel ?? ''} placeholder="Modelo del plan" onBlur={(event) => void updateUser({ defaultModel: event.target.value || null })} /></label>
-                        <p>Vacío usa {planName(selectedUser.defaultPlan)}.</p>
-                      </div>
-                    )}
                   </div>
 
                   <div className="user-actions">
@@ -379,7 +368,7 @@ export default function AdminApp() {
             <label><span>Plan</span><select value={draft.plan} onChange={(event) => setDraft((current) => ({ ...current, plan: event.target.value }))}><option value="basic">Básico</option><option value="pro">Pro</option><option value="max">Max</option></select></label>
             <details>
               <summary>Opciones</summary>
-              <div className="modal-grid"><label><span>Mensajes por mes</span><input type="number" value={draft.limit} onChange={(event) => setDraft((current) => ({ ...current, limit: event.target.value }))} /></label><label className="check-line"><input type="checkbox" checked={draft.isStaff} onChange={(event) => setDraft((current) => ({ ...current, isStaff: event.target.checked }))} /><span>Equipo NEXO</span></label></div>
+              <div className="modal-grid"><label><span>Revisiones por mes</span><input type="number" value={draft.limit} onChange={(event) => setDraft((current) => ({ ...current, limit: event.target.value }))} /></label><label className="check-line"><input type="checkbox" checked={draft.isStaff} onChange={(event) => setDraft((current) => ({ ...current, isStaff: event.target.checked }))} /><span>Equipo NEXO</span></label></div>
             </details>
             <button className="primary full" disabled={Boolean(busy) || !draft.fullName.trim()}>{busy || 'Crear'}</button>
           </form>

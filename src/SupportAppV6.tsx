@@ -3,7 +3,6 @@ import type { FormEvent, ReactNode } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
-  Bot,
   Check,
   ChevronRight,
   Gauge,
@@ -302,7 +301,7 @@ export default function SupportAppV6() {
       const consent = await appBackend.saveConsents(session.deviceToken, useAgent ? activeConsent : toolsConsent);
       setDashboard((current) => current ? { ...current, consent } : current);
       setView(useAgent ? 'assistant' : 'tools');
-      setNotice({ tone: 'success', text: useAgent ? 'Agente activo.' : 'Herramientas listas.' });
+      setNotice({ tone: 'success', text: useAgent ? 'Soporte listo.' : 'Herramientas listas.' });
     } catch (error) {
       setNotice({ tone: 'error', text: errorText(error) });
     } finally {
@@ -591,7 +590,7 @@ export default function SupportAppV6() {
         return;
       }
       const definition = TOOL_CATALOG[call.function.name];
-      if (!definition) throw new Error('El agente pidió una acción inválida.');
+      if (!definition) throw new Error('NEXO pidió una acción inválida.');
       if (definition.mode !== 'read') {
         const waiting = { ...run, status: 'waiting-confirmation' as const };
         setCurrentRun(waiting);
@@ -779,7 +778,7 @@ export default function SupportAppV6() {
 
       {active && consentResolved && (
         <nav className="nv-tabs">
-          {assistantEnabled && <button className={view === 'assistant' ? 'active' : ''} onClick={() => { setView('assistant'); setSelected(null); }}><MessageCircle size={15} /> Asistente</button>}
+          {assistantEnabled && <button className={view === 'assistant' ? 'active' : ''} onClick={() => { setView('assistant'); setSelected(null); }}><MessageCircle size={15} /> Soporte</button>}
           <button className={view === 'tools' ? 'active' : ''} onClick={() => setView('tools')}><LayoutGrid size={15} /> Herramientas</button>
         </nav>
       )}
@@ -800,12 +799,12 @@ export default function SupportAppV6() {
         <section className="nv-consent">
           <span><ShieldCheck size={28} /></span>
           <h1>Elegí cómo usar NEXO</h1>
-          <button onClick={() => void chooseMode(true)} disabled={Boolean(busy)}><b>Agente</b><small>Diagnostica, pide permiso y reporta.</small></button>
-          <button className="secondary" onClick={() => void chooseMode(false)} disabled={Boolean(busy)}><b>Solo herramientas</b><small>Sin compartir reportes.</small></button>
+          <button onClick={() => void chooseMode(true)} disabled={Boolean(busy)}><b>Revisión guiada</b><small>Diagnóstico con autorización.</small></button>
+          <button className="secondary" onClick={() => void chooseMode(false)} disabled={Boolean(busy)}><b>Herramientas</b><small>Sin enviar reportes.</small></button>
         </section>
       ) : view === 'assistant' && assistantEnabled ? (
         <section className="nv-chat">
-          <header><span><Bot size={18} /></span><div><b>NEXO</b><small>{device?.displayName}</small></div></header>
+          <header><span><Headphones size={18} /></span><div><b>NEXO</b><small>{device?.displayName}</small></div></header>
           <div className="nv-thread" ref={thread}>
             {messages.map((item) => <article key={item.id} className={item.role}><span>{item.role === 'assistant' && <NexoMark size={14} />}</span><p>{item.text}</p></article>)}
             {messages.length === 1 && (
