@@ -165,6 +165,51 @@ pub fn register_current_install(current_version: &str) {
 pub fn register_current_install(_current_version: &str) {}
 
 #[cfg(target_os = "windows")]
+pub fn repair_stale_launchers(current_version: &str) {
+    let Ok(current) = env::current_exe() else {
+        return;
+    };
+    let Some(canonical) = canonical_install() else {
+        return;
+    };
+    if normalize(&current) != normalize(&canonical) {
+        return;
+    }
+
+    let _ = persist_active_install(&canonical, current_version);
+    let Some(local_app_data) = env::var_os("LOCALAPPDATA").map(PathBuf::from) else {
+        return;
+    };
+    let stale_copies = [
+        local_app_data
+            .join("Programs")
+            .join("NEXO Support")
+            .join("NEXO Support.exe"),
+        local_app_data
+            .join("NEXO Support")
+            .join("NEXO Support.exe"),
+    ];
+
+    for stale in stale_copies {
+        if !stale.is_file() || normalize(&stale) == normalize(&canonical) {
+            continue;
+        }
+        let backup = stale.with_extension("obsolete.exe");
+        let _ = fs::remove_file(&backup);
+        if fs::rename(&stale, &backup).is_ok() {
+            if fs::copy(&canonical, &stale).is_err() {
+                let _ = fs::rename(&backup, &stale);
+            }
+        } else {
+            let _ = fs::copy(&canonical, &stale);
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn repair_stale_launchers(_current_version: &str) {}
+
+#[cfg(target_os = "windows")]
 fn powershell_literal(path: &Path) -> String {
     path.to_string_lossy().replace('\'', "''")
 }
