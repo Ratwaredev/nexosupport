@@ -5,6 +5,7 @@ use std::{
     thread,
 };
 
+const RESET_PORT: u16 = 5173;
 static RESET_REDIRECT_URL: OnceLock<String> = OnceLock::new();
 
 fn valid_supabase_url(value: &str) -> bool {
@@ -14,7 +15,7 @@ fn valid_supabase_url(value: &str) -> bool {
 fn reset_page(supabase_url: &str, supabase_anon_key: &str) -> Result<String, String> {
     let url = serde_json::to_string(supabase_url).map_err(|error| error.to_string())?;
     let key = serde_json::to_string(supabase_anon_key).map_err(|error| error.to_string())?;
-    Ok(r#"<!doctype html>
+    Ok(r##"<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8">
@@ -40,21 +41,70 @@ fn reset_page(supabase_url: &str, supabase_anon_key: &str) -> Result<String, Str
   <script>
     const SUPABASE_URL = __SUPABASE_URL__;
     const SUPABASE_KEY = __SUPABASE_KEY__;
-    const params = new URLSearchParams(location.hash.replace(/^#/, ''));
-    const accessToken = params.get('access_token');
+    const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
+    const query = new URLSearchParams(location.search);
     const status = document.getElementById('status');
     const form = document.getElementById('form');
-    const errorDescription = params.get('error_description');
+    let accessToken = hash.get('access_token') || query.get('access_token');
 
-    if (errorDescription) {
-      status.textContent = decodeURIComponent(errorDescription.replace(/\+/g, ' '));
+    function fail(message) {
+      status.textContent = message;
       status.className = 'muted error';
-    } else if (!accessToken) {
-      status.textContent = 'El enlace no contiene una sesión válida. Pedí un correo nuevo desde NEXO.';
-      status.className = 'muted error';
-    } else {
+      form.classList.add('hidden');
+    }
+
+    function ready() {
       status.textContent = 'Elegí una contraseña de al menos 8 caracteres.';
+      status.className = 'muted';
       form.classList.remove('hidden');
+    }
+
+    async function verifyTokenHash(tokenHash) {
+      const response = await fetch(`${SUPABASE_URL.replace(/\/$/, '')}/auth/v1/verify`, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ token_hash: tokenHash, type: 'recovery' })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.access_token) {
+        throw new Error(payload.msg || payload.error_description || payload.message || 'El código de recuperación no es válido.');
+      }
+      accessToken = payload.access_token;
+    }
+
+    async function begin() {
+      const errorCode = hash.get('error_code') || query.get('error_code');
+      const errorDescription = hash.get('error_description') || query.get('error_description');
+      if (errorCode || errorDescription) {
+        const expired = errorCode === 'otp_expired' || /expired|invalid/i.test(errorDescription || '');
+        fail(expired
+          ? 'Ese enlace ya fue usado o fue abierto por el escáner del correo. Pedí uno nuevo desde NEXO.'
+          : (errorDescription || 'Supabase rechazó el enlace de recuperación.'));
+        return;
+      }
+
+      if (accessToken) {
+        ready();
+        return;
+      }
+
+      const tokenHash = query.get('token_hash') || hash.get('token_hash');
+      const type = query.get('type') || hash.get('type');
+      if (!tokenHash || (type && type !== 'recovery')) {
+        fail('El enlace no contiene una recuperación válida. Pedí un correo nuevo desde NEXO.');
+        return;
+      }
+
+      try {
+        await verifyTokenHash(tokenHash);
+        history.replaceState({}, document.title, location.pathname);
+        ready();
+      } catch (error) {
+        fail(error instanceof Error ? error.message : 'No se pudo validar el enlace.');
+      }
     }
 
     form.addEventListener('submit', async (event) => {
@@ -62,15 +112,20 @@ fn reset_page(supabase_url: &str, supabase_anon_key: &str) -> Result<String, Str
       const password = document.getElementById('password').value;
       const repeat = document.getElementById('repeat').value;
       if (password.length < 8) {
-        status.textContent = 'La contraseña debe tener al menos 8 caracteres.';
-        status.className = 'muted error';
+        fail('La contraseña debe tener al menos 8 caracteres.');
+        form.classList.remove('hidden');
         return;
       }
       if (password !== repeat) {
-        status.textContent = 'Las contraseñas no coinciden.';
-        status.className = 'muted error';
+        fail('Las contraseñas no coinciden.');
+        form.classList.remove('hidden');
         return;
       }
+      if (!accessToken) {
+        fail('La sesión de recuperación no está disponible. Pedí un correo nuevo desde NEXO.');
+        return;
+      }
+
       status.textContent = 'Guardando…';
       status.className = 'muted';
       try {
@@ -88,14 +143,16 @@ fn reset_page(supabase_url: &str, supabase_anon_key: &str) -> Result<String, Str
         history.replaceState({}, document.title, location.pathname);
         status.textContent = 'Contraseña actualizada. Volvé a NEXO e iniciá sesión.';
         status.className = 'muted ok';
+        accessToken = null;
       } catch {
-        status.textContent = 'No se pudo cambiar la contraseña. Pedí un enlace nuevo desde NEXO.';
-        status.className = 'muted error';
+        fail('No se pudo cambiar la contraseña. Pedí un enlace nuevo desde NEXO.');
       }
     });
+
+    void begin();
   </script>
 </body>
-</html>"#
+</html>"##
         .replace("__SUPABASE_URL__", &url)
         .replace("__SUPABASE_KEY__", &key))
 }
@@ -104,7 +161,7 @@ fn serve(mut stream: TcpStream, page: &str) {
     let mut request = [0_u8; 2048];
     let _ = stream.read(&mut request);
     let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n{}",
         page.len(),
         page
     );
@@ -128,30 +185,18 @@ pub fn start_password_reset_server(
     }
 
     let page = reset_page(supabase_url.trim(), supabase_anon_key.trim())?;
-    let mut listeners = Vec::new();
-    for port in [5173_u16, 3000_u16, 8080_u16] {
-        if let Ok(listener) = TcpListener::bind(("127.0.0.1", port)) {
-            listeners.push(listener);
+    let listener = TcpListener::bind(("127.0.0.1", RESET_PORT)).map_err(|_| {
+        format!(
+            "El puerto local {RESET_PORT} está ocupado. Cerrá la aplicación que lo usa y volvé a pedir el correo."
+        )
+    })?;
+    let redirect = format!("http://127.0.0.1:{RESET_PORT}/reset-password");
+
+    thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            serve(stream, &page);
         }
-    }
-    if listeners.is_empty() {
-        return Err("No se pudo abrir el receptor local de recuperación.".to_string());
-    }
-
-    let port = listeners
-        .iter()
-        .find_map(|listener| listener.local_addr().ok().map(|address| address.port()))
-        .ok_or("No se pudo determinar el puerto de recuperación.")?;
-    let redirect = format!("http://127.0.0.1:{port}/reset-password");
-
-    for listener in listeners {
-        let page = page.clone();
-        thread::spawn(move || {
-            for stream in listener.incoming().flatten() {
-                serve(stream, &page);
-            }
-        });
-    }
+    });
 
     let _ = RESET_REDIRECT_URL.set(redirect.clone());
     Ok(redirect)
