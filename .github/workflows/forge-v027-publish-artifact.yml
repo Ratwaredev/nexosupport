@@ -1,0 +1,106 @@
+name: Publish validated Forge Studio v0.27.0 artifact
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: forge-v027-final-publish
+  cancel-in-progress: true
+
+jobs:
+  publish-release:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Download validated updater build
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          gh run download 30705829728 `
+            --repo Ratwaredev/underdocksoporteapp `
+            --name Forge-Studio-v0.27.0-Windows-updater-enabled `
+            --dir release-assets
+          if ($LASTEXITCODE -ne 0) { throw "Could not download validated Forge artifact" }
+
+          $required = @(
+            "release-assets/Forge-Studio-Setup-0.27.0-x64.exe",
+            "release-assets/Forge-Studio-Setup-0.27.0-x64.exe.blockmap",
+            "release-assets/latest.yml"
+          )
+          foreach ($file in $required) {
+            if (-not (Test-Path $file)) { throw "Artifact file missing: $file" }
+          }
+          $exe = Get-Item "release-assets/Forge-Studio-Setup-0.27.0-x64.exe"
+          if ($exe.Length -lt 100MB) { throw "Installer is unexpectedly small: $($exe.Length)" }
+          Write-Host "Validated installer bytes: $($exe.Length)"
+          Write-Host "Validated installer SHA256: $((Get-FileHash $exe.FullName -Algorithm SHA256).Hash)"
+
+      - name: Publish stable release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          gh release view v0.27.0 --repo Ratwaredev/underdocksoporteapp *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete v0.27.0 --repo Ratwaredev/underdocksoporteapp --cleanup-tag --yes
+            if ($LASTEXITCODE -ne 0) { throw "Could not remove previous v0.27.0 release" }
+          }
+          $global:LASTEXITCODE = 0
+
+          gh release create v0.27.0 `
+            "release-assets/Forge-Studio-Setup-0.27.0-x64.exe" `
+            "release-assets/Forge-Studio-Setup-0.27.0-x64.exe.blockmap" `
+            "release-assets/latest.yml" `
+            --repo Ratwaredev/underdocksoporteapp `
+            --title "Forge Studio v0.27.0" `
+            --notes "Primer instalador de Forge Studio con actualizaciones remotas automáticas. Instalar esta versión una sola vez; las versiones posteriores se descargan desde la aplicación." `
+            --latest
+          if ($LASTEXITCODE -ne 0) { throw "Could not publish Forge v0.27.0" }
+
+      - name: Verify public update channel
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $release = gh release view v0.27.0 --repo Ratwaredev/underdocksoporteapp --json isDraft,isPrerelease,url,assets | ConvertFrom-Json
+          if ($release.isDraft) { throw "Release is still a draft" }
+          if ($release.isPrerelease) { throw "Release is unexpectedly marked prerelease" }
+
+          $names = @($release.assets | ForEach-Object { $_.name })
+          $expected = @(
+            "Forge-Studio-Setup-0.27.0-x64.exe",
+            "Forge-Studio-Setup-0.27.0-x64.exe.blockmap",
+            "latest.yml"
+          )
+          foreach ($name in $expected) {
+            if ($names -notcontains $name) { throw "Public release asset missing: $name" }
+          }
+
+          New-Item -ItemType Directory -Force -Path public-check | Out-Null
+          gh release download v0.27.0 `
+            --repo Ratwaredev/underdocksoporteapp `
+            --pattern latest.yml `
+            --dir public-check `
+            --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Could not download public latest.yml" }
+
+          $localHash = (Get-FileHash "release-assets/latest.yml" -Algorithm SHA256).Hash
+          $publicHash = (Get-FileHash "public-check/latest.yml" -Algorithm SHA256).Hash
+          if ($localHash -ne $publicHash) { throw "Public latest.yml checksum mismatch" }
+
+          Write-Host "Release URL: $($release.url)"
+          Write-Host "Public assets: $($names -join ', ')"
+          Write-Host "latest.yml SHA256: $publicHash"
