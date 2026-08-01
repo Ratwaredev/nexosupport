@@ -1,41 +1,16 @@
-use tauri::{
-    AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
-};
-
-const ADMIN_INIT_SCRIPT: &str = r#"
-window.__NEXO_VIEW__ = 'admin';
-
-document.addEventListener('DOMContentLoaded', () => {
-  const root = document.getElementById('root');
-  if (!root || root.hasChildNodes()) return;
-
-  root.dataset.nexoNativeShell = 'admin';
-  root.innerHTML = `
-    <main style="min-height:100vh;display:grid;place-items:center;background:#f5f6f8;font-family:Inter,Segoe UI,sans-serif;color:#20222a">
-      <section style="display:grid;place-items:center;gap:14px">
-        <span style="width:46px;height:46px;border:3px solid #dedbf8;border-top-color:#654cff;border-radius:50%;animation:nexoAdminSpin .8s linear infinite"></span>
-        <strong style="font-size:13px">Abriendo NEXO Control</strong>
-      </section>
-      <style>@keyframes nexoAdminSpin{to{transform:rotate(360deg)}}</style>
-    </main>`;
-
-  window.setTimeout(() => {
-    if (root.dataset.nexoNativeShell !== 'admin') return;
-    root.innerHTML = `
-      <main style="min-height:100vh;display:grid;place-items:center;background:#f5f6f8;font-family:Inter,Segoe UI,sans-serif;color:#20222a">
-        <section style="width:360px;padding:26px;border:1px solid #dfe1e7;border-radius:18px;display:grid;gap:14px;background:#fff;box-shadow:0 22px 60px rgba(25,28,40,.12)">
-          <strong style="font-size:18px">NEXO Control no pudo cargar</strong>
-          <span style="color:#747985;font-size:12px">Cerrá esta ventana y volvé a abrir Administración.</span>
-          <button id="nexo-native-admin-close" style="height:40px;border:0;border-radius:10px;color:#fff;background:#5a51c7;cursor:pointer">Cerrar</button>
-        </section>
-      </main>`;
-    document.getElementById('nexo-native-admin-close')?.addEventListener('click', () => window.close());
-  }, 8000);
-});
-"#;
+use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, Size, WebviewWindow};
 
 fn dispatch_manual_update_check(window: &WebviewWindow) {
     let _ = window.eval("window.dispatchEvent(new Event('nexo:check-update')); ");
+}
+
+fn dispatch_view(window: &WebviewWindow, view: &str) -> Result<(), String> {
+    window
+        .eval(&format!(
+            "window.dispatchEvent(new CustomEvent('nexo:set-view', {{ detail: '{}' }}));",
+            view
+        ))
+        .map_err(|error| error.to_string())
 }
 
 pub fn reveal_main_window(app: &AppHandle, manual_update_check: bool) -> Result<(), String> {
@@ -78,43 +53,53 @@ pub fn exit_app(app: AppHandle) {
 
 #[tauri::command]
 pub fn open_admin_window(app: AppHandle) -> Result<(), String> {
-    // Never reuse a failed WebView. The admin view now boots from the same
-    // packaged index document as the working support window, and an early
-    // native initialization script selects the admin application before React.
-    if let Some(window) = app.get_webview_window("admin") {
-        window.close().map_err(|error| error.to_string())?;
-    }
+    // Administration deliberately reuses the already working main WebView.
+    // Some Windows installations were rendering every secondary WebView blank.
+    let window = app
+        .get_webview_window("main")
+        .ok_or("No encontré la ventana principal.")?;
 
-    let window = WebviewWindowBuilder::new(
-        &app,
-        "admin",
-        WebviewUrl::App("index.html".into()),
-    )
-    .initialization_script(ADMIN_INIT_SCRIPT)
-    .title("NEXO Control")
-    .inner_size(1100.0, 720.0)
-    .min_inner_size(860.0, 560.0)
-    .resizable(true)
-    .maximizable(true)
-    .minimizable(true)
-    .closable(true)
-    .decorations(true)
-    .transparent(false)
-    .skip_taskbar(false)
-    .visible(true)
-    .center()
-    .build()
-    .map_err(|error| format!("No se pudo crear NEXO Control: {error}"))?;
-
+    window.unminimize().map_err(|error| error.to_string())?;
+    window.set_title("NEXO Control").map_err(|error| error.to_string())?;
+    window.set_decorations(true).map_err(|error| error.to_string())?;
+    window.set_resizable(true).map_err(|error| error.to_string())?;
+    window.set_maximizable(true).map_err(|error| error.to_string())?;
+    window
+        .set_min_size(Some(Size::Logical(LogicalSize::new(860.0, 560.0))))
+        .map_err(|error| error.to_string())?;
+    window
+        .set_max_size(None::<Size>)
+        .map_err(|error| error.to_string())?;
+    window
+        .set_size(Size::Logical(LogicalSize::new(1100.0, 720.0)))
+        .map_err(|error| error.to_string())?;
+    window.center().map_err(|error| error.to_string())?;
+    window.show().map_err(|error| error.to_string())?;
+    dispatch_view(&window, "admin")?;
     window.set_focus().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 pub fn close_admin_window(app: AppHandle) -> Result<(), String> {
-    let Some(window) = app.get_webview_window("admin") else {
-        return Ok(());
-    };
-    window.close().map_err(|error| error.to_string())
+    let window = app
+        .get_webview_window("main")
+        .ok_or("No encontré la ventana principal.")?;
+
+    dispatch_view(&window, "support")?;
+    window.set_title("NEXO Support").map_err(|error| error.to_string())?;
+    window.set_decorations(false).map_err(|error| error.to_string())?;
+    window.set_maximizable(false).map_err(|error| error.to_string())?;
+    window
+        .set_min_size(Some(Size::Logical(LogicalSize::new(400.0, 560.0))))
+        .map_err(|error| error.to_string())?;
+    window
+        .set_max_size(Some(Size::Logical(LogicalSize::new(620.0, 900.0))))
+        .map_err(|error| error.to_string())?;
+    window
+        .set_size(Size::Logical(LogicalSize::new(460.0, 680.0)))
+        .map_err(|error| error.to_string())?;
+    position_popup(&window);
+    window.set_focus().map_err(|error| error.to_string())
 }
 
 pub fn position_popup(window: &WebviewWindow) {
