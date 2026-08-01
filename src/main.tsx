@@ -1,29 +1,48 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
+import AdminBootstrap from './AdminBootstrap';
 import { installBackendErrorGuard } from './lib/backend-error-guard';
 import { ensureLocalOwnerWorkspace } from './lib/local-owner-bootstrap';
 
-type NexoWindow = Window & { __NEXO_VIEW__?: 'admin' | 'support' };
+type NexoView = 'admin' | 'support';
+type NexoWindow = Window & { __NEXO_VIEW__?: NexoView };
+type ViewEvent = CustomEvent<NexoView>;
+type SupportComponent = React.ComponentType;
 
 const url = new URL(window.location.href);
 const nativeView = (window as NexoWindow).__NEXO_VIEW__;
-const isAdminView = nativeView === 'admin' || url.pathname.endsWith('/admin.html') || url.searchParams.get('view') === 'admin';
+const initialView: NexoView = nativeView === 'admin' || url.pathname.endsWith('/admin.html') || url.searchParams.get('view') === 'admin'
+  ? 'admin'
+  : 'support';
+
+function NexoRoot({ SupportApp, AppUpdater }: { SupportApp: SupportComponent; AppUpdater: SupportComponent }) {
+  const [view, setView] = useState<NexoView>(initialView);
+
+  useEffect(() => {
+    const switchView = (event: Event) => {
+      const next = (event as ViewEvent).detail;
+      if (next === 'admin' || next === 'support') setView(next);
+    };
+    window.addEventListener('nexo:set-view', switchView);
+    return () => window.removeEventListener('nexo:set-view', switchView);
+  }, []);
+
+  if (view === 'admin') return <AdminBootstrap />;
+
+  return (
+    <>
+      <SupportApp />
+      <AppUpdater />
+    </>
+  );
+}
 
 async function start() {
   const rootElement = document.getElementById('root');
   if (!rootElement) throw new Error('NEXO root is missing.');
 
-  // Tauri inserts a small native loading shell before the packaged JavaScript
-  // starts. Remove it only after this entry point is definitely executing.
   rootElement.removeAttribute('data-nexo-native-shell');
   rootElement.replaceChildren();
-  const root = ReactDOM.createRoot(rootElement);
-
-  if (isAdminView) {
-    const { default: AdminBootstrap } = await import('./AdminBootstrap');
-    root.render(<AdminBootstrap />);
-    return;
-  }
 
   installBackendErrorGuard();
   ensureLocalOwnerWorkspace();
@@ -37,12 +56,10 @@ async function start() {
     import('./SupportAppV6'),
     import('./AppUpdater')
   ]);
-  root.render(
+
+  ReactDOM.createRoot(rootElement).render(
     <React.StrictMode>
-      <>
-        <SupportAppV6 />
-        <AppUpdater />
-      </>
+      <NexoRoot SupportApp={SupportAppV6} AppUpdater={AppUpdater} />
     </React.StrictMode>
   );
 }
