@@ -3,12 +3,20 @@ import ReactDOM from 'react-dom/client';
 import { installBackendErrorGuard } from './lib/backend-error-guard';
 import { ensureLocalOwnerWorkspace } from './lib/local-owner-bootstrap';
 
+type NexoWindow = Window & { __NEXO_VIEW__?: 'admin' | 'support' };
+
 const url = new URL(window.location.href);
-const isAdminView = url.pathname.endsWith('/admin.html') || url.searchParams.get('view') === 'admin';
+const nativeView = (window as NexoWindow).__NEXO_VIEW__;
+const isAdminView = nativeView === 'admin' || url.pathname.endsWith('/admin.html') || url.searchParams.get('view') === 'admin';
 
 async function start() {
   const rootElement = document.getElementById('root');
   if (!rootElement) throw new Error('NEXO root is missing.');
+
+  // Tauri inserts a small native loading shell before the packaged JavaScript
+  // starts. Remove it only after this entry point is definitely executing.
+  rootElement.removeAttribute('data-nexo-native-shell');
+  rootElement.replaceChildren();
   const root = ReactDOM.createRoot(rootElement);
 
   if (isAdminView) {
@@ -43,6 +51,7 @@ void start().catch((error: unknown) => {
   console.error('NEXO startup failure', error);
   const root = document.getElementById('root');
   if (!root) return;
+  root.removeAttribute('data-nexo-native-shell');
   root.innerHTML = `
     <main style="min-height:100vh;display:grid;place-items:center;background:#f5f6f8;font-family:Segoe UI,sans-serif;color:#20222a">
       <section style="width:340px;padding:24px;border:1px solid #dfe1e7;border-radius:16px;background:#fff;box-shadow:0 20px 55px rgba(20,24,36,.12)">
