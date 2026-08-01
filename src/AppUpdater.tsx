@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, CircleAlert, RefreshCw, X } from 'lucide-react';
+import { Check, CircleAlert, Download, RefreshCw, X } from 'lucide-react';
 import { isTauriRuntime, safeInvoke } from './lib/tauri';
 
 type AvailableUpdate = { version: string; notes?: string | null };
@@ -8,32 +8,12 @@ type UpdateState =
   | { status: 'checking' }
   | { status: 'current' }
   | { status: 'available'; update: AvailableUpdate }
-  | { status: 'installing'; update: AvailableUpdate }
   | { status: 'error'; update?: AvailableUpdate; message: string };
 
-type DismissedUpdate = { version: string; until: number };
-
+// Manual throttle only. NEXO never checks for updates by itself.
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
-const AUTO_CHECK_EVERY_MS = Math.max(24 * 60 * 60 * 1000, CHECK_EVERY_MS);
-const SNOOZE_MS = 24 * 60 * 60 * 1000;
-const LAST_CHECK_KEY = 'nexo:update:last-successful-check';
-
-function storedLastCheck() {
-  try {
-    const value = Number(localStorage.getItem(LAST_CHECK_KEY) || 0);
-    return Number.isFinite(value) ? value : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function rememberCheck(value: number) {
-  try {
-    localStorage.setItem(LAST_CHECK_KEY, String(value));
-  } catch {
-    // A failed preference write must never block the app.
-  }
-}
+const MANUAL_THROTTLE_MS = Math.min(CHECK_EVERY_MS, 1200);
+// app-update-installing intentionally removed: NEXO never installs or restarts itself.
 
 function UpdateMark({ size = 32 }: { size?: number }) {
   const id = `update-x-${size}`;
@@ -55,17 +35,13 @@ function readableError(error: unknown) {
   const raw = error instanceof Error ? error.message : '';
   if (/network|fetch|internet|connection|dns/i.test(raw)) return 'Sin conexión';
   if (/signature|firma/i.test(raw)) return 'Firma inválida';
-  if (/versi[oó]n|version|stale|antigua|older/i.test(raw)) return 'La versión cambió. Buscá de nuevo.';
-  return 'No se pudo actualizar';
+  return 'No se pudo abrir la descarga';
 }
 
 export default function AppUpdater() {
   const [state, setState] = useState<UpdateState>({ status: 'idle' });
-  const started = useRef(false);
-  const installing = useRef(false);
   const checking = useRef(false);
-  const dismissed = useRef<DismissedUpdate | null>(null);
-  const lastSuccessfulCheck = useRef(storedLastCheck());
+  const lastManualCheck = useRef(0);
   const noticeTimer = useRef<number | null>(null);
 
   const hideSoon = useCallback(() => {
@@ -73,65 +49,41 @@ export default function AppUpdater() {
     noticeTimer.current = window.setTimeout(() => setState({ status: 'idle' }), 1800);
   }, []);
 
-  const dismiss = useCallback((update?: AvailableUpdate) => {
-    if (update?.version) dismissed.current = { version: update.version, until: Date.now() + SNOOZE_MS };
-    setState({ status: 'idle' });
-  }, []);
-
-  const install = useCallback(async (update: AvailableUpdate) => {
-    if (installing.current) return;
-    installing.current = true;
-    setState({ status: 'installing', update });
-    try {
-      await safeInvoke('install_app_update', { expectedVersion: update.version });
-      setState({ status: 'idle' });
-    } catch (error) {
-      installing.current = false;
-      setState({ status: 'error', update, message: readableError(error) });
-    }
-  }, []);
-
-  const check = useCallback(async (manual = false) => {
-    if (!isTauriRuntime() || installing.current || checking.current) return;
+  const check = useCallback(async () => {
+    if (!isTauriRuntime() || checking.current) return;
     const now = Date.now();
-    if (!manual && now - lastSuccessfulCheck.current < AUTO_CHECK_EVERY_MS) return;
-
+    if (now - lastManualCheck.current < MANUAL_THROTTLE_MS) return;
+    lastManualCheck.current = now;
     checking.current = true;
-    if (manual) setState({ status: 'checking' });
+    setState({ status: 'checking' });
     try {
       const update = await safeInvoke<AvailableUpdate | null>('check_app_update');
-      const checkedAt = Date.now();
-      lastSuccessfulCheck.current = checkedAt;
-      rememberCheck(checkedAt);
-
-      if (update) {
-        const previous = dismissed.current;
-        if (!manual && previous?.version === update.version && Date.now() < previous.until) return;
-        setState({ status: 'available', update });
-      } else if (manual) {
-        dismissed.current = null;
+      if (update) setState({ status: 'available', update });
+      else {
         setState({ status: 'current' });
         hideSoon();
       }
     } catch (error) {
-      if (manual) setState({ status: 'error', message: readableError(error) });
+      setState({ status: 'error', message: readableError(error) });
     } finally {
       checking.current = false;
     }
   }, [hideSoon]);
 
+  const download = useCallback(async (update: AvailableUpdate) => {
+    try {
+      await safeInvoke('open_update_download', { version: update.version });
+      setState({ status: 'idle' });
+    } catch (error) {
+      setState({ status: 'error', update, message: readableError(error) });
+    }
+  }, []);
+
   useEffect(() => {
-    if (!isTauriRuntime() || started.current) return;
-    started.current = true;
-
-    // A startup must remain usable. Automatic checks happen at most once per day
-    // and only after the app has been open for a while.
-    const first = window.setTimeout(() => void check(false), 30_000);
-    const manual = () => void check(true);
+    if (!isTauriRuntime()) return;
+    const manual = () => void check();
     window.addEventListener('nexo:check-update', manual);
-
     return () => {
-      window.clearTimeout(first);
       if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
       window.removeEventListener('nexo:check-update', manual);
     };
@@ -148,24 +100,16 @@ export default function AppUpdater() {
     );
   }
 
-  if (state.status === 'installing') {
-    return (
-      <aside className="app-update-installing" role="status" aria-label="Instalando actualización">
-        <span className="app-update-orb" aria-hidden="true"><i /></span>
-      </aside>
-    );
-  }
-
   const update = state.update;
   const failed = state.status === 'error';
   return (
     <aside className={`app-update-panel ${failed ? 'error' : ''}`} role="dialog" aria-modal="false">
-      <button className="app-update-close" aria-label="Cerrar" onClick={() => dismiss(update)}><X size={14} /></button>
+      <button className="app-update-close" aria-label="Cerrar" onClick={() => setState({ status: 'idle' })}><X size={14} /></button>
       <span>{failed ? <CircleAlert size={19} /> : <UpdateMark size={30} />}</span>
-      <div><small>{failed ? state.message : `v${update?.version || ''}`}</small><b>{failed ? 'Reintentar' : 'Actualización lista'}</b></div>
+      <div><small>{failed ? state.message : `v${update?.version || ''}`}</small><b>{failed ? 'No se pudo abrir' : 'Nueva versión'}</b></div>
       <footer>
-        <button onClick={() => dismiss(update)}>Después</button>
-        <button onClick={() => update ? void install(update) : void check(true)}>{failed ? 'Buscar' : 'Actualizar'}</button>
+        <button onClick={() => setState({ status: 'idle' })}>Ahora no</button>
+        <button onClick={() => update ? void download(update) : void check()}>{failed ? 'Reintentar' : <><Download size={14} /> Descargar</>}</button>
       </footer>
     </aside>
   );
