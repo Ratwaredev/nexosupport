@@ -1,7 +1,9 @@
 mod actions;
 mod diagnostics;
 mod disk;
+mod manual_update;
 mod optimizer;
+mod password_reset;
 mod remote;
 mod sensors;
 mod types;
@@ -92,6 +94,7 @@ pub fn run() {
             disk::read_disk_health,
             sensors::read_hardware_sensors,
             optimizer::optimize_temp_files,
+            password_reset::start_password_reset_server,
             actions::create_remote_session,
             actions::agent_status,
             actions::run_agent_action,
@@ -100,7 +103,7 @@ pub fn run() {
             remote::managed_open_remote_tool,
             remote::managed_connect_remote_tool,
             updates::check_app_update,
-            updates::install_app_update
+            manual_update::open_update_download
         ])
         .run(tauri::generate_context!())
         .expect("error while running NEXO Support");
