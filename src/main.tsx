@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import AdminBootstrap from './AdminBootstrap';
 import { installBackendErrorGuard } from './lib/backend-error-guard';
 import { ensureLocalOwnerWorkspace } from './lib/local-owner-bootstrap';
+import { installPasswordResetRedirect } from './lib/password-reset-interceptor';
 
 type NexoView = 'admin' | 'support';
 type NexoWindow = Window & { __NEXO_VIEW__?: NexoView };
@@ -45,6 +46,7 @@ async function start() {
   rootElement.replaceChildren();
 
   installBackendErrorGuard();
+  installPasswordResetRedirect();
   ensureLocalOwnerWorkspace();
 
   await Promise.all([
