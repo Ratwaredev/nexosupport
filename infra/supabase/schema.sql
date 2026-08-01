@@ -1,3 +1,4 @@
+-- Fresh schema restore after the NEXO Control window repair.
 create extension if not exists pgcrypto;
 
 create table if not exists public.admin_users (
