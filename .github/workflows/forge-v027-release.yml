@@ -89,10 +89,11 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $packageScript = @'
+          $patchScript = @'
           const fs = require("fs");
-          const path = "forge-app/package.json";
-          const pkg = JSON.parse(fs.readFileSync(path, "utf8"));
+
+          const packagePath = "forge-app/package.json";
+          const pkg = JSON.parse(fs.readFileSync(packagePath, "utf8"));
           pkg.version = "0.27.0";
           pkg.build = pkg.build || {};
           pkg.build.publish = [{
@@ -110,31 +111,30 @@ jobs:
             createStartMenuShortcut: true,
             artifactName: "Forge-Studio-Setup-${version}-${arch}.${ext}"
           };
-          fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + "\n");
-          '@
-          Set-Content -Path configure-package.cjs -Value $packageScript -Encoding UTF8
-          node configure-package.cjs
+          fs.writeFileSync(packagePath, JSON.stringify(pkg, null, 2) + "\n");
 
-          $mainPath = "forge-app/desktop/main.cjs"
-          $main = Get-Content $mainPath -Raw
-          $main = $main.Replace('autoUpdater.autoDownload = false;', 'autoUpdater.autoDownload = true;')
+          const mainPath = "forge-app/desktop/main.cjs";
+          let main = fs.readFileSync(mainPath, "utf8");
+          if (!main.includes("autoUpdater.autoDownload = false;")) {
+            throw new Error("Could not locate autoDownload configuration");
+          }
+          main = main.replace("autoUpdater.autoDownload = false;", "autoUpdater.autoDownload = true;");
 
-          $oldReady = @'
-              createWindow(token);
-              configureUpdater();
-          '@
-          $newReady = @'
-              createWindow(token);
+          const startupPattern = /createWindow\(token\);\s*configureUpdater\(\);/;
+          if (!startupPattern.test(main)) {
+            throw new Error("Could not locate updater startup block");
+          }
+          main = main.replace(startupPattern, `createWindow(token);
               configureUpdater();
               if (autoUpdater) {
                 const check = () => autoUpdater.checkForUpdates().catch((error) => sendUpdate({ state: "error", message: error.message }));
                 setTimeout(check, 5000);
                 setInterval(check, 4 * 60 * 60 * 1000);
-              }
+              }`);
+          fs.writeFileSync(mainPath, main);
           '@
-          if (-not $main.Contains($oldReady)) { throw "Could not locate updater startup block" }
-          $main = $main.Replace($oldReady, $newReady)
-          Set-Content -Path $mainPath -Value $main -Encoding UTF8
+          Set-Content -Path patch-updater.cjs -Value $patchScript -Encoding UTF8
+          node patch-updater.cjs
 
           Set-Content "forge-app/README.md" "# Forge Studio"
           New-Item -ItemType Directory -Force -Path "forge-app/docs" | Out-Null
@@ -151,7 +151,7 @@ jobs:
           node --check desktop/main.cjs
           node --check dist/server/index.js
           node --check dist/agent/index.js
-          node -e "const fs=require('fs'); const p=require('./package.json'); const m=fs.readFileSync('desktop/main.cjs','utf8'); if(p.version!=='0.27.0') process.exit(1); if(p.build.publish[0].repo!=='underdocksoporteapp') process.exit(2); if(!m.includes('autoUpdater.autoDownload = true')) process.exit(3); if(!m.includes('setTimeout(check, 5000)')) process.exit(4)"
+          node -e "const fs=require('fs'); const p=require('./package.json'); const m=fs.readFileSync('desktop/main.cjs','utf8'); if(p.version!=='0.27.0') process.exit(1); if(p.build.publish[0].repo!=='underdocksoporteapp') process.exit(2); if(!m.includes('autoUpdater.autoDownload = true')) process.exit(3); if(!m.includes('setTimeout(check, 5000)')) process.exit(4); if(!m.includes('setInterval(check, 4 * 60 * 60 * 1000)')) process.exit(5)"
 
       - name: Build Windows installer
         if: github.event_name != 'push'
