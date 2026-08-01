@@ -13,8 +13,8 @@ permissions:
   contents: write
 
 concurrency:
-  group: forge-v027-release
-  cancel-in-progress: false
+  group: forge-v027-release-${{ github.event_name }}
+  cancel-in-progress: true
 
 jobs:
   windows-installer:
@@ -30,45 +30,61 @@ jobs:
         with:
           node-version: 22
 
-      - name: Reconstruct private Forge runtime payload
+      - name: Reconstruct Forge runtime
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $parts = Get-ChildItem "forge-build/payload/part-*" | Sort-Object Name
-          if ($parts.Count -ne 15) { throw "Expected 15 payload files, found $($parts.Count)" }
 
-          $allText = New-Object System.Text.StringBuilder
-          foreach ($part in $parts) {
-            $raw = Get-Content $part.FullName -Raw
-            $clean = [regex]::Replace($raw, '[^A-Za-z0-9+/=]', '')
-            [void]$allText.Append($clean)
+          function Decode-Parts($pattern, $output) {
+            $parts = Get-ChildItem $pattern | Sort-Object Name
+            if ($parts.Count -eq 0) { throw "No payload files matched $pattern" }
+            $joined = New-Object System.Text.StringBuilder
+            foreach ($part in $parts) {
+              $raw = Get-Content $part.FullName -Raw
+              [void]$joined.Append([regex]::Replace($raw, '[^A-Za-z0-9+/=]', ''))
+            }
+            $payload = $joined.ToString()
+            $remainder = $payload.Length % 4
+            if ($remainder -ne 0) { $payload += '=' * (4 - $remainder) }
+            [IO.File]::WriteAllBytes($output, [Convert]::FromBase64String($payload))
           }
 
-          $payload = $allText.ToString()
-          $remainder = $payload.Length % 4
-          if ($remainder -ne 0) { $payload += '=' * (4 - $remainder) }
-          [IO.File]::WriteAllBytes("forge-runtime.tar.xz", [Convert]::FromBase64String($payload))
+          $baseParts = Get-ChildItem "forge-build/payload/part-*" | Sort-Object Name
+          if ($baseParts.Count -ne 15) { throw "Expected 15 base payload files, found $($baseParts.Count)" }
+          Decode-Parts "forge-build/payload/part-*" "forge-runtime.tar.xz"
 
           New-Item -ItemType Directory -Force -Path forge-app | Out-Null
           tar -xJf forge-runtime.tar.xz -C forge-app
           if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Payload tail is truncated; using all safely extracted runtime files."
+            Write-Warning "The archived preview tail was truncated; restoring the verified runtime tail patch."
             $global:LASTEXITCODE = 0
           }
-          Remove-Item "forge-app/public/library-previews/slipstream.webp" -Force -ErrorAction SilentlyContinue
-          if (-not (Test-Path "forge-app/package.json")) { throw "package.json missing" }
+
+          Decode-Parts "forge-build/runtime-tail/part-*" "forge-runtime-tail.tar.xz"
+          $tailHash = (Get-FileHash "forge-runtime-tail.tar.xz" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($tailHash -ne "e79184fc53d3739051811ded325eca00cdeac9e2957c435b8cecfdccf907b43f") {
+            throw "Runtime tail checksum mismatch: $tailHash"
+          }
+          tar -xJf forge-runtime-tail.tar.xz -C forge-app
+          if ($LASTEXITCODE -ne 0) { throw "Could not restore Forge runtime tail" }
+
           $required = @(
+            "forge-app/package.json",
             "forge-app/desktop/main.cjs",
             "forge-app/dist/server/index.js",
             "forge-app/dist/agent/index.js",
-            "forge-app/public/index.html"
+            "forge-app/public/index.html",
+            "forge-app/public/app.js",
+            "forge-app/public/styles.css",
+            "forge-app/scripts/init-local-auth.mjs",
+            "forge-app/scripts/apply-pending-update.mjs"
           )
-          foreach ($item in $required) { if (-not (Test-Path $item)) { throw "Required runtime file missing: $item" } }
-          Write-Host "Extracted files: $((Get-ChildItem forge-app -Recurse -File).Count)"
-          Write-Host "Scripts present: $((Get-ChildItem forge-app/scripts -File -ErrorAction SilentlyContinue).Count)"
-          Write-Host "Public files present: $((Get-ChildItem forge-app/public -Recurse -File -ErrorAction SilentlyContinue).Count)"
+          foreach ($item in $required) {
+            if (-not (Test-Path $item)) { throw "Required runtime file missing: $item" }
+          }
+          Write-Host "Forge runtime restored: $((Get-ChildItem forge-app -Recurse -File).Count) files"
 
-      - name: Configure permanent public update channel
+      - name: Configure automatic public updates
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -124,25 +140,29 @@ jobs:
           New-Item -ItemType Directory -Force -Path "forge-app/docs" | Out-Null
           Set-Content "forge-app/docs/README.md" "# Forge Studio"
 
-          $version = node -p "require('./forge-app/package.json').version"
-          if ($version -ne "0.27.0") { throw "Expected Forge Studio 0.27.0, got $version" }
-
-      - name: Install dependencies
+      - name: Install build dependencies
         working-directory: forge-app
         run: npm install --no-audit --no-fund
 
-      - name: Validate Forge
+      - name: Validate updater configuration
         working-directory: forge-app
         shell: pwsh
         run: |
           node --check desktop/main.cjs
           node --check dist/server/index.js
           node --check dist/agent/index.js
-          node -e "const p=require('./package.json'); if(p.version!=='0.27.0') process.exit(1); if(p.build.publish[0].repo!=='underdocksoporteapp') process.exit(2)"
-          if (-not (Test-Path scripts/init-local-auth.mjs)) { Write-Warning "init-local-auth script is absent from truncated tail" }
-          if (-not (Test-Path scripts/apply-pending-update.mjs)) { Write-Warning "legacy ZIP updater script is absent; Electron updater remains active" }
+          node -e "const fs=require('fs'); const p=require('./package.json'); const m=fs.readFileSync('desktop/main.cjs','utf8'); if(p.version!=='0.27.0') process.exit(1); if(p.build.publish[0].repo!=='underdocksoporteapp') process.exit(2); if(!m.includes('autoUpdater.autoDownload = true')) process.exit(3); if(!m.includes('setTimeout(check, 5000)')) process.exit(4)"
 
-      - name: Build and publish Windows installer
+      - name: Build Windows installer
+        if: github.event_name != 'push'
+        working-directory: forge-app
+        shell: pwsh
+        run: npx electron-builder --win nsis --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Build and publish Windows update release
+        if: github.event_name == 'push'
         working-directory: forge-app
         shell: pwsh
         run: npx electron-builder --win nsis --publish always
@@ -154,11 +174,14 @@ jobs:
         working-directory: forge-app
         shell: pwsh
         run: |
-          $exe = Get-ChildItem release/Forge-Studio-Setup-0.27.0-x64.exe
-          $yml = Get-ChildItem release/latest.yml
-          $blockmap = Get-ChildItem release/*.blockmap
-          if (-not $exe -or -not $yml -or -not $blockmap) { throw "Updater assets missing" }
-          Get-FileHash $exe.FullName -Algorithm SHA256 | Format-List
+          $exe = Get-Item release/Forge-Studio-Setup-0.27.0-x64.exe
+          $yml = Get-Item release/latest.yml
+          $blockmap = Get-Item release/Forge-Studio-Setup-0.27.0-x64.exe.blockmap
+          if ($exe.Length -lt 100MB) { throw "Installer is unexpectedly small: $($exe.Length)" }
+          Write-Host "Installer bytes: $($exe.Length)"
+          Write-Host "Installer SHA256: $((Get-FileHash $exe.FullName -Algorithm SHA256).Hash)"
+          Write-Host "Metadata bytes: $($yml.Length)"
+          Write-Host "Blockmap bytes: $($blockmap.Length)"
 
       - name: Upload validation copy
         uses: actions/upload-artifact@v4
