@@ -69,3 +69,5 @@ $$;
 
 revoke all on function public.create_remote_session(text, text) from public;
 grant execute on function public.create_remote_session(text, text) to anon, authenticated;
+
+-- Fresh restore trigger after repository secret update: 2026-08-01.
