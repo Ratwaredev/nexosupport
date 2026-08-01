@@ -8,6 +8,8 @@
   Delete "$LOCALAPPDATA\NEXO Support\NEXO Support.exe"
   Delete "$LOCALAPPDATA\NEXO Support\NEXO Support.obsolete.exe"
   Delete "$LOCALAPPDATA\NEXO Support\active-install.json"
+  Delete "$LOCALAPPDATA\NEXO Support\canonical-install-v2.ok"
+  Delete "$APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\NEXO Support.lnk"
 
   ; Borrar accesos viejos tanto del usuario como de todos los usuarios.
   SetShellVarContext current
