@@ -1,0 +1,124 @@
+name: Restore NEXO schema v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-supabase-schema-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.NEXO_SUPABASE_PAT || secrets.SUPABASE_ACCESS_TOKEN }}
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      NEXO_ADMIN_EMAIL: franciscosuarez@live.com.ar
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate secret and project
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${SUPABASE_ACCESS_TOKEN:-}" || { echo 'No management token reached this runner'; exit 1; }
+          test -n "${VITE_SUPABASE_URL:-}" || { echo 'Missing VITE_SUPABASE_URL'; exit 1; }
+          project_ref="$(python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+          host = urlparse(os.environ['VITE_SUPABASE_URL']).hostname or ''
+          suffix = '.supabase.co'
+          if not host.endswith(suffix):
+              raise SystemExit('Invalid Supabase project URL')
+          print(host[:-len(suffix)])
+          PY
+          )"
+          echo "SUPABASE_PROJECT_REF=$project_ref" >> "$GITHUB_ENV"
+
+      - name: Restore complete schema and Francisco admin
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' > "$RUNNER_TEMP/nexo-restore-v2.json"
+          import json
+          import os
+          from pathlib import Path
+
+          email = os.environ['NEXO_ADMIN_EMAIL'].replace("'", "''")
+          reset = r'''
+          drop policy if exists "admin users self read" on public.admin_users;
+          drop policy if exists "admin users self insert" on public.admin_users;
+          drop policy if exists "pairing codes admin only" on public.pairing_codes;
+          drop policy if exists "devices admin read" on public.devices;
+          drop policy if exists "devices admin update" on public.devices;
+          drop policy if exists "devices admin insert" on public.devices;
+          drop policy if exists "tickets admin read" on public.tickets;
+          drop policy if exists "tickets admin write" on public.tickets;
+          drop policy if exists "diagnostics admin read" on public.diagnostics;
+          drop policy if exists "diagnostics admin write" on public.diagnostics;
+          drop policy if exists "sessions admin read" on public.sessions;
+          drop policy if exists "sessions admin write" on public.sessions;
+          drop policy if exists "releases public read" on public.releases;
+          '''
+          files = [
+              Path('infra/supabase/schema.sql'),
+              Path('infra/supabase/nexo-assistant.sql'),
+              Path('infra/supabase/secure-agent.sql'),
+          ]
+          admin = f'''
+          do $$
+          declare
+            target_user_id uuid;
+            target_email text;
+          begin
+            select id, email into target_user_id, target_email
+            from auth.users
+            where lower(email) = lower('{email}')
+            limit 1;
+            if target_user_id is null then
+              raise exception 'missing auth user for {email}';
+            end if;
+            delete from public.admin_users
+            where lower(email) = lower('{email}') and user_id <> target_user_id;
+            insert into public.admin_users(user_id, email, org_name, role)
+            values (target_user_id, target_email, 'NEXO', 'admin')
+            on conflict (user_id) do update set
+              email = excluded.email,
+              org_name = excluded.org_name,
+              role = 'admin';
+          end
+          $$;
+
+          do $$
+          begin
+            if to_regclass('public.support_users') is null then raise exception 'missing support_users'; end if;
+            if to_regclass('public.devices') is null then raise exception 'missing devices'; end if;
+            if to_regclass('public.pairing_codes') is null then raise exception 'missing pairing_codes'; end if;
+            if to_regprocedure('public.generate_user_pairing_code(uuid)') is null then raise exception 'missing generate_user_pairing_code'; end if;
+            if not exists (select 1 from public.admin_users where lower(email)=lower('{email}')) then
+              raise exception 'Francisco is not mapped as administrator';
+            end if;
+          end
+          $$;
+
+          select json_build_object(
+            'admin_email', '{email}',
+            'admins', (select count(*) from public.admin_users),
+            'support_users', (select count(*) from public.support_users),
+            'devices', (select count(*) from public.devices),
+            'pairing_function', to_regprocedure('public.generate_user_pairing_code(uuid)') is not null
+          ) as nexo_restore;
+          '''
+          query = reset + '\n\n' + '\n\n'.join(path.read_text(encoding='utf-8') for path in files) + '\n\n' + admin
+          print(json.dumps({'query': query, 'read_only': False}))
+          PY
+
+          curl --fail-with-body --silent --show-error \
+            -X POST "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/database/query" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data-binary "@$RUNNER_TEMP/nexo-restore-v2.json"
