@@ -38,3 +38,5 @@ jobs:
           git rm .github/workflows/apply-branch-patch-once.yml
           git commit -m "Remove one-shot patch workflow"
           git push origin main
+
+# second commit intentionally triggers the already-registered workflow
