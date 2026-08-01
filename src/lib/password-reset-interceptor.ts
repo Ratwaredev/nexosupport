@@ -15,9 +15,10 @@ export function installPasswordResetRedirect() {
 
   const originalFetch = window.fetch.bind(window);
   window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = requestUrl(input);
+    const rawUrl = requestUrl(input);
     const method = (init?.method || 'GET').toUpperCase();
-    if (!url.endsWith('/auth/v1/recover') || method !== 'POST') {
+    const request = new URL(rawUrl);
+    if (!request.pathname.endsWith('/auth/v1/recover') || method !== 'POST') {
       return originalFetch(input, init);
     }
 
@@ -27,15 +28,14 @@ export function installPasswordResetRedirect() {
       throw new Error('La recuperación no está configurada.');
     }
 
-    const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : {};
     const redirectTo = await safeInvoke<string>('start_password_reset_server', {
       supabaseUrl,
       supabaseAnonKey
     });
 
-    return originalFetch(input, {
-      ...init,
-      body: JSON.stringify({ ...body, redirect_to: redirectTo })
-    });
+    // GoTrue reads redirect_to from the request URL. Sending it inside the JSON
+    // body is ignored and falls back to the project Site URL.
+    request.searchParams.set('redirect_to', redirectTo);
+    return originalFetch(request.toString(), init);
   }) as typeof window.fetch;
 }
