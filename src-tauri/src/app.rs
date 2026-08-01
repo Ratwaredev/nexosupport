@@ -15,12 +15,10 @@ use tauri::{
 };
 
 pub fn run() {
-    let current_version = env!("CARGO_PKG_VERSION");
-    if updates::redirect_to_active_install(current_version) {
+    if updates::redirect_to_canonical_install() {
         return;
     }
-    updates::register_current_install(current_version);
-    updates::repair_stale_launchers(current_version);
+    updates::repair_legacy_installations();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
