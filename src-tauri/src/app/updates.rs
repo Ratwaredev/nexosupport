@@ -5,6 +5,7 @@ use tauri_plugin_updater::UpdaterExt;
 #[cfg(target_os = "windows")]
 use std::{
     env,
+    fs,
     os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::Command,
@@ -76,6 +77,13 @@ fn canonical_install() -> Option<PathBuf> {
 }
 
 #[cfg(target_os = "windows")]
+fn migration_marker() -> Option<PathBuf> {
+    env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .map(|root| root.join("NEXO Support").join("canonical-install-v2.ok"))
+}
+
+#[cfg(target_os = "windows")]
 fn normalize(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
@@ -113,6 +121,7 @@ pub fn redirect_to_canonical_install() -> bool {
 
 /// Once the canonical app is running, remove the old per-user executable and
 /// rebuild the user-facing shortcuts so Windows Search can no longer revive it.
+/// The marker is only a completed-migration flag; it is never used for routing.
 #[cfg(target_os = "windows")]
 pub fn repair_legacy_installations() {
     let Ok(current) = env::current_exe() else {
@@ -125,11 +134,20 @@ pub fn repair_legacy_installations() {
         return;
     }
 
+    let Some(marker) = migration_marker() else {
+        return;
+    };
+    if marker.is_file() {
+        return;
+    }
+
     let canonical = powershell_literal(&canonical);
+    let marker = powershell_literal(&marker);
     let script = format!(
         "$ErrorActionPreference='SilentlyContinue'; \
          Start-Sleep -Milliseconds 1400; \
          $canonical='{canonical}'; \
+         $marker='{marker}'; \
          $legacyProgram=Join-Path $env:LOCALAPPDATA 'Programs\\NEXO Support'; \
          if(Test-Path -LiteralPath $legacyProgram){{Remove-Item -LiteralPath $legacyProgram -Recurse -Force}}; \
          $legacyRoot=Join-Path $env:LOCALAPPDATA 'NEXO Support'; \
@@ -137,12 +155,14 @@ pub fn repair_legacy_installations() {
            $item=Join-Path $legacyRoot $name; \
            if(Test-Path -LiteralPath $item){{Remove-Item -LiteralPath $item -Force}} \
          }}; \
+         $desktop=Join-Path ([Environment]::GetFolderPath('Desktop')) 'NEXO Support.lnk'; \
+         $programs=Join-Path ([Environment]::GetFolderPath('Programs')) 'NEXO Support.lnk'; \
+         $pinned=Join-Path $env:APPDATA 'Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar\\NEXO Support.lnk'; \
+         foreach($link in @($desktop,$programs,$pinned)){{ \
+           if(Test-Path -LiteralPath $link){{Remove-Item -LiteralPath $link -Force}} \
+         }}; \
          $shell=New-Object -ComObject WScript.Shell; \
-         foreach($link in @(\
-           (Join-Path ([Environment]::GetFolderPath('Desktop')) 'NEXO Support.lnk'), \
-           (Join-Path ([Environment]::GetFolderPath('Programs')) 'NEXO Support.lnk')\
-         )){{ \
-           if(Test-Path -LiteralPath $link){{Remove-Item -LiteralPath $link -Force}}; \
+         foreach($link in @($desktop,$programs)){{ \
            $shortcut=$shell.CreateShortcut($link); \
            $shortcut.TargetPath=$canonical; \
            $shortcut.WorkingDirectory=Split-Path $canonical; \
@@ -150,8 +170,10 @@ pub fn repair_legacy_installations() {
          }}; \
          $appPath='HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\NEXO Support.exe'; \
          New-Item -Path $appPath -Force | Out-Null; \
-         Set-ItemProperty -Path $appPath -Name '(default)' -Value $canonical -Force; \
-         Set-ItemProperty -Path $appPath -Name 'Path' -Value (Split-Path $canonical) -Force"
+         Set-Item -Path $appPath -Value $canonical -Force; \
+         New-ItemProperty -Path $appPath -Name 'Path' -Value (Split-Path $canonical) -PropertyType String -Force | Out-Null; \
+         New-Item -ItemType Directory -Path (Split-Path $marker) -Force | Out-Null; \
+         Set-Content -LiteralPath $marker -Value $canonical -Encoding UTF8"
     );
 
     let _ = Command::new("powershell.exe")
