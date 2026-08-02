@@ -1,0 +1,13 @@
+{
+  "urlConfigured": true,
+  "keyConfigured": true,
+  "hostname": "byuktfnrwgtjkpjkovai.supabase.co",
+  "urlProjectRef": "byuktfnrwgtjkpjkovai",
+  "keyProjectRef": "byuktfnrwgtjkpjkovai",
+  "keyRole": "anon",
+  "keyIssuer": "supabase",
+  "refsMatch": true,
+  "sourceCommit": "d412887a044884829aa2773bbed8e7228aeac93c",
+  "runId": "30726783931",
+  "checkedAt": "2026-08-02T01:17:19.402Z"
+}
