@@ -1,0 +1,68 @@
+name: Apply admin auth token fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-admin-auth-token-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/admin-auth-token-camelcase
+          fetch-depth: 0
+
+      - name: Fix camelized Supabase auth response
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/lib/backend.ts')
+          text = path.read_text(encoding='utf-8')
+
+          access_count = text.count('a.access_token')
+          refresh_count = text.count('a.refresh_token')
+          if access_count != 2:
+              raise SystemExit(f'Expected 2 a.access_token references, found {access_count}')
+          if refresh_count != 1:
+              raise SystemExit(f'Expected 1 a.refresh_token reference, found {refresh_count}')
+
+          text = text.replace('a.access_token', 'a.accessToken')
+          text = text.replace('a.refresh_token', 'a.refreshToken')
+          path.write_text(text, encoding='utf-8')
+
+          contract = Path('scripts/verify-product-contracts.mjs')
+          contract_text = contract.read_text(encoding='utf-8')
+          marker = "const backendSource = read('src/lib/backend.ts');"
+          if marker not in contract_text:
+              contract_text += "\n\n// Admin auth tokens are camelized by backend.ts before use.\nconst adminBackendSource = read('src/lib/backend.ts');\nassert(!adminBackendSource.includes('a.access_token'), 'Admin login must not use snake_case access_token after camel conversion.');\nassert(!adminBackendSource.includes('a.refresh_token'), 'Admin login must not use snake_case refresh_token after camel conversion.');\nassert(adminBackendSource.includes('a.accessToken'), 'Admin login must pass the authenticated access token to PostgREST.');\n"
+              contract.write_text(contract_text, encoding='utf-8')
+          PY
+
+      - name: Validate focused fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+          node scripts/verify-product-contracts.mjs
+          ! grep -R "a\.access_token\|a\.refresh_token" src/lib/backend.ts
+          grep -q "a.accessToken" src/lib/backend.ts
+
+      - name: Commit branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/backend.ts scripts/verify-product-contracts.mjs
+          git commit -m "fix: preserve authenticated Supabase admin token"
+          git push origin HEAD:fix/admin-auth-token-camelcase
