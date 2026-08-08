@@ -146,15 +146,48 @@ jobs:
           releaseBody: |
             Actualización estable de NEXO Support.
 
-            - El updater ya no reinicia copias viejas ni busca una versión en cada apertura.
-            - Administración abre con una pantalla segura, se puede cerrar con Esc y no reutiliza ventanas blancas.
-            - Las publicaciones son deliberadas: un cambio interno ya no genera automáticamente otra versión pública.
+            - Inicio de sesión por email y código.
+            - Actualizaciones remotas firmadas y automáticas.
+            - Administración y soporte remoto conservan sus validaciones de producción.
           releaseDraft: false
           prerelease: false
           updaterJsonPreferNsis: true
           uploadUpdaterJson: true
           uploadUpdaterSignatures: true
           retryAttempts: 2
+
+      - name: Publish shared desktop auth config
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:VITE_SUPABASE_URL) -or [string]::IsNullOrWhiteSpace($env:VITE_SUPABASE_ANON_KEY)) {
+            throw 'Missing Supabase client configuration.'
+          }
+          $auth = [ordered]@{
+            provider = 'supabase'
+            version = 1
+            supabaseUrl = $env:VITE_SUPABASE_URL
+            supabaseAnonKey = $env:VITE_SUPABASE_ANON_KEY
+            otpType = 'email'
+          }
+          $auth | ConvertTo-Json -Depth 4 | Set-Content -Path auth-config.json -Encoding utf8
+          gh release upload "v$env:NEXO_VERSION" auth-config.json --repo "${{ github.repository }}" --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish auth-config.json.' }
+
+      - name: Verify shared auth config
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = "https://github.com/${{ github.repository }}/releases/download/v$env:NEXO_VERSION/auth-config.json"
+          $response = Invoke-WebRequest -Uri $url -UseBasicParsing -MaximumRedirection 10 -TimeoutSec 30
+          $raw = if ($response.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
+          $config = $raw | ConvertFrom-Json
+          if ($config.provider -ne 'supabase') { throw 'Unexpected auth provider.' }
+          if ([string]::IsNullOrWhiteSpace($config.supabaseUrl)) { throw 'Published auth config has no URL.' }
+          if ([string]::IsNullOrWhiteSpace($config.supabaseAnonKey)) { throw 'Published auth config has no anon key.' }
+          if ($config.otpType -ne 'email') { throw 'Published auth config is not email OTP.' }
 
       - name: Verify published updater feed
         id: verify_updater

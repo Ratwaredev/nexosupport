@@ -1,0 +1,90 @@
+name: Publish desktop auth config
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.release-trigger'
+      - '.github/workflows/publish-desktop-auth-config.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish-auth-config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Build client auth config
+        env:
+          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_ANON_KEY:-}" ]; then
+            echo "Missing Supabase client configuration" >&2
+            exit 1
+          fi
+          node - <<'NODE'
+          const fs = require('fs');
+          const value = {
+            provider: 'supabase',
+            version: 1,
+            supabaseUrl: process.env.SUPABASE_URL,
+            supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
+            otpType: 'email'
+          };
+          fs.writeFileSync('auth-config.json', JSON.stringify(value, null, 2) + '\n');
+          NODE
+
+      - name: Resolve release for this commit
+        id: tag
+        env:
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          tag="${EVENT_TAG:-}"
+          if [ -z "$tag" ]; then
+            for attempt in $(seq 1 90); do
+              tag=$(gh api "repos/${{ github.repository }}/releases" --jq ".[] | select(.target_commitish == \"$EXPECTED_SHA\") | .tag_name" | head -n 1)
+              if [ -n "$tag" ]; then break; fi
+              echo "Waiting for the release built from $EXPECTED_SHA ($attempt/90)"
+              sleep 10
+            done
+          fi
+          if [ -z "$tag" ]; then
+            echo "No published release points to $EXPECTED_SHA" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Publish config asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" auth-config.json --repo "${{ github.repository }}" --clobber
+
+      - name: Verify published config
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir verify
+          gh release download "$RELEASE_TAG" --repo "${{ github.repository }}" --pattern auth-config.json --dir verify
+          node - <<'NODE'
+          const fs = require('fs');
+          const value = JSON.parse(fs.readFileSync('verify/auth-config.json', 'utf8'));
+          if (value.provider !== 'supabase') throw new Error('Unexpected auth provider');
+          if (!/^https:\/\//.test(value.supabaseUrl || '')) throw new Error('Missing Supabase URL');
+          if (!value.supabaseAnonKey || value.supabaseAnonKey.length < 20) throw new Error('Missing Supabase anon key');
+          if (value.otpType !== 'email') throw new Error('OTP contract missing');
+          console.log('Desktop auth config verified');
+          NODE

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, CircleAlert, Download, RefreshCw, X } from 'lucide-react';
+import { Check, CircleAlert, Download, LoaderCircle, RefreshCw } from 'lucide-react';
 import { isTauriRuntime, safeInvoke } from './lib/tauri';
 
 type AvailableUpdate = { version: string; notes?: string | null };
@@ -8,12 +8,13 @@ type UpdateState =
   | { status: 'checking' }
   | { status: 'current' }
   | { status: 'available'; update: AvailableUpdate }
+  | { status: 'installing'; update: AvailableUpdate }
   | { status: 'error'; update?: AvailableUpdate; message: string };
 
-// Manual throttle only. NEXO never checks for updates by itself.
+const STARTUP_CHECK_DELAY_MS = 5_000;
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
-const MANUAL_THROTTLE_MS = Math.min(CHECK_EVERY_MS, 1200);
-// app-update-installing intentionally removed: NEXO never installs or restarts itself.
+const RECHECK_MS = CHECK_EVERY_MS;
+const RETRY_MS = 15 * 60 * 1000;
 
 function UpdateMark({ size = 32 }: { size?: number }) {
   const id = `update-x-${size}`;
@@ -35,45 +36,55 @@ function readableError(error: unknown) {
   const raw = error instanceof Error ? error.message : '';
   if (/network|fetch|internet|connection|dns/i.test(raw)) return 'Sin conexión';
   if (/signature|firma/i.test(raw)) return 'Firma inválida';
-  return 'No se pudo abrir la descarga';
+  if (/permission|access|denied|administrator/i.test(raw)) return 'Windows bloqueó la actualización';
+  return 'No se pudo actualizar';
 }
 
 export default function AppUpdater() {
   const [state, setState] = useState<UpdateState>({ status: 'idle' });
   const checking = useRef(false);
-  const lastManualCheck = useRef(0);
-  const noticeTimer = useRef<number | null>(null);
+  const installing = useRef(false);
+  const retryTimer = useRef<number | null>(null);
 
-  const hideSoon = useCallback(() => {
-    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
-    noticeTimer.current = window.setTimeout(() => setState({ status: 'idle' }), 1800);
+  const install = useCallback(async (update: AvailableUpdate) => {
+    if (installing.current) return;
+    installing.current = true;
+    setState({ status: 'installing', update });
+    try {
+      await safeInvoke('install_app_update', { expectedVersion: update.version });
+    } catch (error) {
+      setState({ status: 'error', update, message: readableError(error) });
+      if (retryTimer.current) window.clearTimeout(retryTimer.current);
+      retryTimer.current = window.setTimeout(() => {
+        installing.current = false;
+        window.dispatchEvent(new CustomEvent('nexo:check-update'));
+      }, RETRY_MS);
+    }
   }, []);
 
   const check = useCallback(async () => {
-    if (!isTauriRuntime() || checking.current) return;
-    const now = Date.now();
-    if (now - lastManualCheck.current < MANUAL_THROTTLE_MS) return;
-    lastManualCheck.current = now;
+    if (!isTauriRuntime() || checking.current || installing.current) return;
     checking.current = true;
     setState({ status: 'checking' });
     try {
       const update = await safeInvoke<AvailableUpdate | null>('check_app_update');
-      if (update) setState({ status: 'available', update });
-      else {
+      if (update) {
+        setState({ status: 'available', update });
+        window.setTimeout(() => void install(update), 900);
+      } else {
         setState({ status: 'current' });
-        hideSoon();
+        window.setTimeout(() => setState({ status: 'idle' }), 1400);
       }
     } catch (error) {
       setState({ status: 'error', message: readableError(error) });
     } finally {
       checking.current = false;
     }
-  }, [hideSoon]);
+  }, [install]);
 
-  const download = useCallback(async (update: AvailableUpdate) => {
+  const openFallback = useCallback(async (update: AvailableUpdate) => {
     try {
       await safeInvoke('open_update_download', { version: update.version });
-      setState({ status: 'idle' });
     } catch (error) {
       setState({ status: 'error', update, message: readableError(error) });
     }
@@ -81,10 +92,14 @@ export default function AppUpdater() {
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
+    const startup = window.setTimeout(() => void check(), STARTUP_CHECK_DELAY_MS);
+    const repeat = window.setInterval(() => void check(), RECHECK_MS);
     const manual = () => void check();
     window.addEventListener('nexo:check-update', manual);
     return () => {
-      if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+      window.clearTimeout(startup);
+      window.clearInterval(repeat);
+      if (retryTimer.current) window.clearTimeout(retryTimer.current);
       window.removeEventListener('nexo:check-update', manual);
     };
   }, [check]);
@@ -95,21 +110,37 @@ export default function AppUpdater() {
     return (
       <aside className={`app-update-toast ${state.status}`} role="status">
         {state.status === 'current' ? <Check size={15} /> : <RefreshCw className="spin" size={15} />}
-        <b>{state.status === 'current' ? 'Al día' : 'Buscando'}</b>
+        <b>{state.status === 'current' ? 'Al día' : 'Buscando actualización'}</b>
+      </aside>
+    );
+  }
+
+  if (state.status === 'installing') {
+    return (
+      <aside className="app-update-installing" role="status">
+        <span className="app-update-orb"><LoaderCircle className="spin" size={18} /></span>
+        <b>Actualizando NEXO…</b>
+      </aside>
+    );
+  }
+
+  if (state.status === 'available') {
+    return (
+      <aside className="app-update-panel" role="status">
+        <span><UpdateMark size={30} /></span>
+        <div><small>v{state.update.version}</small><b>Nueva versión</b></div>
       </aside>
     );
   }
 
   const update = state.update;
-  const failed = state.status === 'error';
   return (
-    <aside className={`app-update-panel ${failed ? 'error' : ''}`} role="dialog" aria-modal="false">
-      <button className="app-update-close" aria-label="Cerrar" onClick={() => setState({ status: 'idle' })}><X size={14} /></button>
-      <span>{failed ? <CircleAlert size={19} /> : <UpdateMark size={30} />}</span>
-      <div><small>{failed ? state.message : `v${update?.version || ''}`}</small><b>{failed ? 'No se pudo abrir' : 'Nueva versión'}</b></div>
+    <aside className="app-update-panel error" role="dialog" aria-modal="false">
+      <span><CircleAlert size={19} /></span>
+      <div><small>{state.message}</small><b>Actualización pendiente</b></div>
       <footer>
-        <button onClick={() => setState({ status: 'idle' })}>Ahora no</button>
-        <button onClick={() => update ? void download(update) : void check()}>{failed ? 'Reintentar' : <><Download size={14} /> Descargar</>}</button>
+        <button onClick={() => void check()}><RefreshCw size={14} /> Reintentar</button>
+        {update ? <button onClick={() => void openFallback(update)}><Download size={14} /> Descargar</button> : null}
       </footer>
     </aside>
   );
