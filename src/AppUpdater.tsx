@@ -12,7 +12,8 @@ type UpdateState =
   | { status: 'error'; update?: AvailableUpdate; message: string };
 
 const STARTUP_CHECK_DELAY_MS = 5_000;
-const RECHECK_MS = 60 * 60 * 1000;
+const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
+const RECHECK_MS = CHECK_EVERY_MS;
 const RETRY_MS = 15 * 60 * 1000;
 
 function UpdateMark({ size = 32 }: { size?: number }) {
@@ -116,9 +117,9 @@ export default function AppUpdater() {
 
   if (state.status === 'installing') {
     return (
-      <aside className="app-update-panel" role="status">
-        <span><LoaderCircle className="spin" size={24} /></span>
-        <div><small>v{state.update.version}</small><b>Actualizando NEXO…</b></div>
+      <aside className="app-update-installing" role="status">
+        <span className="app-update-orb"><LoaderCircle className="spin" size={18} /></span>
+        <b>Actualizando NEXO…</b>
       </aside>
     );
   }
