@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "node scripts/verify-admin-auth-token.mjs && tsc && vite build",
+    "build": "node scripts/verify-admin-auth-token.mjs && tsc && vite build && node scripts/verify-user-update-contracts.mjs",
     "preview": "vite preview",
     "postinstall": "node scripts/audit-production.mjs",
     "prepare:icon": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-icon.ps1",
