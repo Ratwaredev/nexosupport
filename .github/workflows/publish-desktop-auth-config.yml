@@ -1,6 +1,11 @@
 name: Publish desktop auth config
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.release-trigger'
+      - '.github/workflows/publish-desktop-auth-config.yml'
   release:
     types: [published]
   workflow_dispatch:
@@ -11,6 +16,7 @@ permissions:
 jobs:
   publish-auth-config:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Build client auth config
         env:
@@ -34,16 +40,26 @@ jobs:
           fs.writeFileSync('auth-config.json', JSON.stringify(value, null, 2) + '\n');
           NODE
 
-      - name: Resolve release tag
+      - name: Resolve release for this commit
         id: tag
         env:
           EVENT_TAG: ${{ github.event.release.tag_name }}
           GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           tag="${EVENT_TAG:-}"
           if [ -z "$tag" ]; then
-            tag=$(gh release view --repo "${{ github.repository }}" --json tagName --jq .tagName)
+            for attempt in $(seq 1 90); do
+              tag=$(gh api "repos/${{ github.repository }}/releases" --jq ".[] | select(.target_commitish == \"$EXPECTED_SHA\") | .tag_name" | head -n 1)
+              if [ -n "$tag" ]; then break; fi
+              echo "Waiting for the release built from $EXPECTED_SHA ($attempt/90)"
+              sleep 10
+            done
+          fi
+          if [ -z "$tag" ]; then
+            echo "No published release points to $EXPECTED_SHA" >&2
+            exit 1
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
