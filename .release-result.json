@@ -1,37 +1,37 @@
 {
-  "version": "0.4.94",
+  "version": "0.4.95",
   "status": "success",
-  "runId": "30759633218",
-  "commit": "683c4dc86d73c40634d183c8eb02ba30811a99bd",
-  "releaseUrl": "https://github.com/Ratwaredev/nexosupport/releases/tag/v0.4.94",
+  "runId": "31236844301",
+  "commit": "5d61b033fbdd7d422ab880cf219261001600449a",
+  "releaseUrl": "https://github.com/Ratwaredev/nexosupport/releases/tag/v0.4.95",
   "updaterPlatform": "windows-x86_64-nsis",
   "updaterProbe": {
     "ok": true,
-    "manifestUrl": "https://github.com/Ratwaredev/nexosupport/releases/download/v0.4.94/latest.json",
-    "expectedVersion": "0.4.94",
-    "version": "0.4.94",
+    "manifestUrl": "https://github.com/Ratwaredev/nexosupport/releases/download/v0.4.95/latest.json",
+    "expectedVersion": "0.4.95",
+    "version": "0.4.95",
     "platform": "windows-x86_64-nsis",
-    "assetUrl": "https://github.com/Ratwaredev/nexosupport/releases/download/v0.4.94/NEXO.Support_0.4.94_x64-setup.exe",
+    "assetUrl": "https://github.com/Ratwaredev/nexosupport/releases/download/v0.4.95/NEXO.Support_0.4.95_x64-setup.exe",
     "signatureLength": 424,
-    "assetBytes": 53132232,
+    "assetBytes": 53139634,
     "error": null,
-    "checkedAt": "2026-08-02T17:52:35.3738868Z",
+    "checkedAt": "2026-08-08T03:28:14.7649815Z",
     "manifest": {
-      "version": "0.4.94",
-      "notes": "Actualización estable de NEXO Support.\n\n- El updater ya no reinicia copias viejas ni busca una versión en cada apertura.\n- Administración abre con una pantalla segura, se puede cerrar con Esc y no reutiliza ventanas blancas.\n- Las publicaciones son deliberadas: un cambio interno ya no genera automáticamente otra versión pública.",
-      "pub_date": "2026-08-02T17:52:33.349Z",
+      "version": "0.4.95",
+      "notes": "Actualización estable de NEXO Support.\n\n- Inicio de sesión por email y código.\n- Actualizaciones remotas firmadas y automáticas.\n- Administración y soporte remoto conservan sus validaciones de producción.",
+      "pub_date": "2026-08-08T03:28:05.405Z",
       "platforms": {
         "windows-x86_64": {
-          "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNmRLdjZsRGxEam4rVzlCWnFXeFJ5WmZ4YndhRFVoZytxTmJwQjlNQ04xUUNkWkxMYkFHb2gzYzlxOVZ2dWVNc0lVUjV1K2hJd25KYVlTMnBnOWkzczdjT0hqVUxQR2dRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1NjkzMTUwCWZpbGU6TkVYTyBTdXBwb3J0XzAuNC45NF94NjQtc2V0dXAuZXhlCkp0cmJ5MkZKc2ZOS0pmYXJzMjljVGJSTDhKSkR5U0U2U01Na1lUV3NJc0RtcmtSc3F5QldNalJEWWxCT25TeS9FYmorS2xocCs0R0JhdFl0cXd0YkF3PT0K",
-          "url": "https://github.com/Ratwaredev/nexosupport/releases/download/v0.4.94/NEXO.Support_0.4.94_x64-setup.exe"
+          "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNmRLdjZsRGxEampIbXZDOGRWMTNCNTgrV3FLZTFpNTRzcHZCdFd1QkhpeU0zaHRZMlpuQ3pIWlRVNnZrSDlHOUJrbnVpeXlLNW9xK1UreXpaOXlHclVPYXpHZmZwY0FJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MTU5NjgwCWZpbGU6TkVYTyBTdXBwb3J0XzAuNC45NV94NjQtc2V0dXAuZXhlCkxxNHJRSldCWUkwSUdJRnozYkQ1U21tVGM0ZW9kWHRFc29zZE10cGtBeHhzYkpPTUErVExTeTJxWVlpL3N4ekJEU3QvOU14VGh0bm44TXB5QVIyVkRRPT0K",
+          "url": "https://github.com/Ratwaredev/nexosupport/releases/download/v0.4.95/NEXO.Support_0.4.95_x64-setup.exe"
         },
         "windows-x86_64-nsis": {
-          "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNmRLdjZsRGxEam4rVzlCWnFXeFJ5WmZ4YndhRFVoZytxTmJwQjlNQ04xUUNkWkxMYkFHb2gzYzlxOVZ2dWVNc0lVUjV1K2hJd25KYVlTMnBnOWkzczdjT0hqVUxQR2dRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1NjkzMTUwCWZpbGU6TkVYTyBTdXBwb3J0XzAuNC45NF94NjQtc2V0dXAuZXhlCkp0cmJ5MkZKc2ZOS0pmYXJzMjljVGJSTDhKSkR5U0U2U01Na1lUV3NJc0RtcmtSc3F5QldNalJEWWxCT25TeS9FYmorS2xocCs0R0JhdFl0cXd0YkF3PT0K",
-          "url": "https://github.com/Ratwaredev/nexosupport/releases/download/v0.4.94/NEXO.Support_0.4.94_x64-setup.exe"
+          "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNmRLdjZsRGxEampIbXZDOGRWMTNCNTgrV3FLZTFpNTRzcHZCdFd1QkhpeU0zaHRZMlpuQ3pIWlRVNnZrSDlHOUJrbnVpeXlLNW9xK1UreXpaOXlHclVPYXpHZmZwY0FJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MTU5NjgwCWZpbGU6TkVYTyBTdXBwb3J0XzAuNC45NV94NjQtc2V0dXAuZXhlCkxxNHJRSldCWUkwSUdJRnozYkQ1U21tVGM0ZW9kWHRFc29zZE10cGtBeHhzYkpPTUErVExTeTJxWVlpL3N4ekJEU3QvOU14VGh0bm44TXB5QVIyVkRRPT0K",
+          "url": "https://github.com/Ratwaredev/nexosupport/releases/download/v0.4.95/NEXO.Support_0.4.95_x64-setup.exe"
         }
       }
     }
   },
   "runtimeMode": "connected",
-  "recordedAt": "2026-08-02T17:52:35.773Z"
+  "recordedAt": "2026-08-08T03:28:15.270Z"
 }
