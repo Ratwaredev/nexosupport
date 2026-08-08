@@ -103,6 +103,7 @@ pub fn run() {
             remote::managed_open_remote_tool,
             remote::managed_connect_remote_tool,
             updates::check_app_update,
+            updates::install_app_update,
             manual_update::open_update_download
         ])
         .run(tauri::generate_context!())
