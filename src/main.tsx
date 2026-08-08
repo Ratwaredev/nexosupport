@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import AdminBootstrap from './AdminBootstrap';
+import EmailCodeAuth from './EmailCodeAuth';
 import { installBackendErrorGuard } from './lib/backend-error-guard';
 import { ensureLocalOwnerWorkspace } from './lib/local-owner-bootstrap';
 import { installPasswordResetRedirect } from './lib/password-reset-interceptor';
@@ -52,7 +53,8 @@ async function start() {
   await Promise.all([
     import('./support-v7.css'),
     import('./support-agent.css'),
-    import('./updater.css')
+    import('./updater.css'),
+    import('./email-auth.css')
   ]);
   const [{ default: SupportAppV6 }, { default: AppUpdater }] = await Promise.all([
     import('./SupportAppV6'),
@@ -61,7 +63,9 @@ async function start() {
 
   ReactDOM.createRoot(rootElement).render(
     <React.StrictMode>
-      <NexoRoot SupportApp={SupportAppV6} AppUpdater={AppUpdater} />
+      <EmailCodeAuth>
+        <NexoRoot SupportApp={SupportAppV6} AppUpdater={AppUpdater} />
+      </EmailCodeAuth>
     </React.StrictMode>
   );
 }
