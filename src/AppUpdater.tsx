@@ -124,16 +124,16 @@ export default function AppUpdater() {
     );
   }
 
-  const update = state.update;
   if (state.status === 'available') {
     return (
       <aside className="app-update-panel" role="status">
         <span><UpdateMark size={30} /></span>
-        <div><small>v{update.version}</small><b>Nueva versión</b></div>
+        <div><small>v{state.update.version}</small><b>Nueva versión</b></div>
       </aside>
     );
   }
 
+  const update = state.update;
   return (
     <aside className="app-update-panel error" role="dialog" aria-modal="false">
       <span><CircleAlert size={19} /></span>
