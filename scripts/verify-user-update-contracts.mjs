@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
-const [updater, app, tauri, manual, main, auth, authClient, authWorkflow] = await Promise.all([
+const [updater, app, tauri, manual, main, auth, authClient, authWorkflow, releaseWorkflow] = await Promise.all([
   readFile('src/AppUpdater.tsx', 'utf8'),
   readFile('src-tauri/src/app.rs', 'utf8'),
   readFile('src-tauri/tauri.conf.json', 'utf8'),
@@ -8,7 +8,8 @@ const [updater, app, tauri, manual, main, auth, authClient, authWorkflow] = awai
   readFile('src/main.tsx', 'utf8'),
   readFile('src/EmailCodeAuth.tsx', 'utf8'),
   readFile('src/lib/email-code-auth.ts', 'utf8'),
-  readFile('.github/workflows/publish-desktop-auth-config.yml', 'utf8')
+  readFile('.github/workflows/publish-desktop-auth-config.yml', 'utf8'),
+  readFile('.github/workflows/publish-release.yml', 'utf8')
 ]);
 
 function need(source, value, message) {
@@ -27,6 +28,8 @@ need(auth, 'Enviar código', 'Email code UI missing.');
 for (const value of ['/auth/v1/otp', '/auth/v1/verify', "type: 'email'", 'create_user: true'])
   need(authClient, value, `Email auth contract missing: ${value}`);
 for (const value of ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY', 'auth-config.json', 'gh release upload'])
-  need(authWorkflow, value, `Shared desktop auth config contract missing: ${value}`);
+  need(authWorkflow, value, `Shared desktop auth repair contract missing: ${value}`);
+for (const value of ['Publish shared desktop auth config', 'auth-config.json', 'gh release upload', 'Verify shared auth config'])
+  need(releaseWorkflow, value, `Production release auth contract missing: ${value}`);
 
 console.log('NEXO contracts verified: email-code users + automatic signed updates.');
