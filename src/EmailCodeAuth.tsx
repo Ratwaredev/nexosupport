@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Check, LoaderCircle, LogOut, Mail } from 'lucide-react';
+import { isTauriRuntime } from './lib/tauri';
 import {
   type EmailUserSession,
   requestEmailCode,
@@ -12,8 +13,9 @@ import {
 type Step = 'email' | 'code';
 
 export default function EmailCodeAuth({ children }: { children: ReactNode }) {
+  const native = isTauriRuntime();
   const [session, setSession] = useState<EmailUserSession | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(native);
   const [working, setWorking] = useState(false);
   const [step, setStep] = useState<Step>('email');
   const [email, setEmail] = useState('');
@@ -21,6 +23,10 @@ export default function EmailCodeAuth({ children }: { children: ReactNode }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    if (!native) {
+      setLoading(false);
+      return;
+    }
     let active = true;
     void restoreEmailSession().then(value => {
       if (!active) return;
@@ -31,7 +37,7 @@ export default function EmailCodeAuth({ children }: { children: ReactNode }) {
       setLoading(false);
     });
     return () => { active = false; };
-  }, []);
+  }, [native]);
 
   async function sendCode(event: FormEvent) {
     event.preventDefault();
@@ -71,6 +77,8 @@ export default function EmailCodeAuth({ children }: { children: ReactNode }) {
     setCode('');
     await signOutEmailSession(current);
   }
+
+  if (!native) return <>{children}</>;
 
   if (loading) {
     return <main className="email-auth-shell"><LoaderCircle className="email-auth-spinner" size={24} /></main>;
