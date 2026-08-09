@@ -1,0 +1,94 @@
+name: Configure Supabase email OTP
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/configure-email-otp.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.NEXO_SUPABASE_PAT || secrets.SUPABASE_ACCESS_TOKEN }}
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+    steps:
+      - name: Resolve Supabase project
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${SUPABASE_ACCESS_TOKEN:-}" || { echo 'Missing Supabase management token'; exit 1; }
+          test -n "${VITE_SUPABASE_URL:-}" || { echo 'Missing VITE_SUPABASE_URL'; exit 1; }
+          project_ref="$(python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+          host = urlparse(os.environ['VITE_SUPABASE_URL']).hostname or ''
+          suffix = '.supabase.co'
+          if not host.endswith(suffix):
+              raise SystemExit('Invalid Supabase project URL')
+          print(host[:-len(suffix)])
+          PY
+          )"
+          echo "SUPABASE_PROJECT_REF=$project_ref" >> "$GITHUB_ENV"
+
+      - name: Read current auth configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/config/auth" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -o "$RUNNER_TEMP/auth-before.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          value = json.loads(Path(os.environ['RUNNER_TEMP'], 'auth-before.json').read_text())
+          print('Current magic-link subject:', value.get('mailer_subjects_magic_link'))
+          print('Current template mode:', 'otp' if '{{ .Token }}' in (value.get('mailer_templates_magic_link_content') or '') else 'link')
+          print('Current site_url:', value.get('site_url'))
+          PY
+
+      - name: Configure six-digit email OTP
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/auth-patch.json" <<'JSON'
+          {
+            "mailer_subjects_magic_link": "Tu código de acceso a Forge",
+            "mailer_templates_magic_link_content": "<div style=\"font-family:Inter,Segoe UI,Arial,sans-serif;max-width:520px;margin:0 auto;color:#20211f\"><h2 style=\"font-size:22px;margin:0 0 12px\">Tu código de acceso</h2><p style=\"font-size:14px;line-height:1.55;margin:0 0 18px\">Usá este código para entrar a Forge. Vence en pocos minutos y sólo puede usarse una vez.</p><div style=\"font-size:32px;letter-spacing:8px;font-weight:700;margin:18px 0 20px\">{{ .Token }}</div><p style=\"font-size:12px;color:#777;margin:0\">Si no pediste este código, ignorá este correo.</p></div>"
+          }
+          JSON
+          curl --fail-with-body --silent --show-error \
+            -X PATCH "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/config/auth" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data-binary "@$RUNNER_TEMP/auth-patch.json" \
+            -o "$RUNNER_TEMP/auth-patch-response.json"
+
+      - name: Verify OTP configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/config/auth" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -o "$RUNNER_TEMP/auth-after.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          value = json.loads(Path(os.environ['RUNNER_TEMP'], 'auth-after.json').read_text())
+          template = value.get('mailer_templates_magic_link_content') or ''
+          subject = value.get('mailer_subjects_magic_link') or ''
+          if '{{ .Token }}' not in template:
+              raise SystemExit('OTP token variable missing after PATCH')
+          if '{{ .ConfirmationURL }}' in template:
+              raise SystemExit('Magic-link confirmation URL still present after PATCH')
+          if subject != 'Tu código de acceso a Forge':
+              raise SystemExit('Unexpected OTP subject after PATCH')
+          print('Supabase email auth is configured for OTP codes, not magic links.')
+          PY
