@@ -40,6 +40,31 @@ jobs:
           fs.writeFileSync('auth-config.json', JSON.stringify(value, null, 2) + '\n');
           NODE
 
+      - name: Require live Supabase Auth
+        env:
+          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+          origin="${SUPABASE_URL%/}"
+          status=$(curl --silent --show-error --output auth-settings.json --write-out '%{http_code}' \
+            --fail-with-body --location --retry 6 --retry-all-errors --retry-delay 3 \
+            --connect-timeout 10 --max-time 30 \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            "$origin/auth/v1/settings")
+          if [ "$status" != "200" ]; then
+            echo "Supabase Auth preflight failed (HTTP $status). Desktop auth config will not be published." >&2
+            cat auth-settings.json >&2 || true
+            exit 1
+          fi
+          node - <<'NODE'
+          const fs = require('fs');
+          const value = JSON.parse(fs.readFileSync('auth-settings.json', 'utf8'));
+          if (!value || typeof value !== 'object') throw new Error('Invalid Supabase Auth settings response');
+          console.log('Supabase Auth is live; desktop auth config may be published.');
+          NODE
+
       - name: Resolve release for this commit
         id: tag
         env:
