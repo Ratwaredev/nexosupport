@@ -1,0 +1,134 @@
+name: Diagnose NEXO backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-nexo-backend.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+    steps:
+      - name: Validate client configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${SUPABASE_URL:-}" || { echo 'Missing VITE_SUPABASE_URL'; exit 1; }
+          test -n "${SUPABASE_ANON_KEY:-}" || { echo 'Missing VITE_SUPABASE_ANON_KEY'; exit 1; }
+          echo 'Client configuration present.'
+
+      - name: Probe Supabase Auth and REST schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          origin="${SUPABASE_URL%/}"
+
+          auth_status=$(curl --silent --show-error --output "$RUNNER_TEMP/auth.json" --write-out '%{http_code}' \
+            --location --connect-timeout 10 --max-time 30 \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            "$origin/auth/v1/settings")
+          echo "AUTH_HTTP=$auth_status"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path(os.environ['RUNNER_TEMP'], 'auth.json')
+          try:
+              value = json.loads(path.read_text())
+          except Exception:
+              value = {}
+          print('AUTH_SETTINGS_JSON=' + ('ok' if isinstance(value, dict) and value else 'invalid'))
+          PY
+
+          rest_status=$(curl --silent --show-error --output "$RUNNER_TEMP/openapi.json" --write-out '%{http_code}' \
+            --location --connect-timeout 10 --max-time 30 \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H 'Accept: application/openapi+json' \
+            "$origin/rest/v1/")
+          echo "REST_OPENAPI_HTTP=$rest_status"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          expected_tables = ['admin_users','support_users','pairing_codes','devices','tickets','diagnostics','sessions','releases','device_entitlements','device_consents']
+          expected_rpcs = ['generate_pairing_code','generate_user_pairing_code','register_device']
+          try:
+              value = json.loads(Path(os.environ['RUNNER_TEMP'], 'openapi.json').read_text())
+              paths = set((value.get('paths') or {}).keys())
+          except Exception:
+              paths = set()
+          for name in expected_tables:
+              print(f'TABLE {name}: ' + ('present' if f'/{name}' in paths else 'missing'))
+          for name in expected_rpcs:
+              print(f'RPC {name}: ' + ('present' if f'/rpc/{name}' in paths else 'missing'))
+          PY
+
+      - name: Probe known tables without reading private rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          origin="${SUPABASE_URL%/}"
+          for table in admin_users support_users pairing_codes devices tickets diagnostics sessions releases device_entitlements device_consents; do
+            status=$(curl --silent --show-error --output "$RUNNER_TEMP/$table.json" --write-out '%{http_code}' \
+              --location --connect-timeout 10 --max-time 30 \
+              -H "apikey: $SUPABASE_ANON_KEY" \
+              -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+              "$origin/rest/v1/$table?select=*&limit=0")
+            code=$(python - "$RUNNER_TEMP/$table.json" <<'PY'
+          import json, sys
+          try:
+              value=json.load(open(sys.argv[1]))
+              print(value.get('code','') if isinstance(value,dict) else '')
+          except Exception:
+              print('')
+          PY
+          )
+            echo "TABLE_HTTP $table=$status${code:+ code=$code}"
+          done
+
+      - name: Read public release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          origin="${SUPABASE_URL%/}"
+          status=$(curl --silent --show-error --output "$RUNNER_TEMP/releases.json" --write-out '%{http_code}' \
+            --location --connect-timeout 10 --max-time 30 \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            "$origin/rest/v1/releases?select=version,published_at,is_active&order=published_at.desc&limit=3")
+          echo "RELEASES_HTTP=$status"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          try:
+              value=json.loads(Path(os.environ['RUNNER_TEMP'],'releases.json').read_text())
+          except Exception:
+              value=[]
+          if isinstance(value,list):
+              for row in value:
+                  print('RELEASE ' + str({k: row.get(k) for k in ('version','published_at','is_active')}))
+          PY
+
+      - name: Probe assistant edge function
+        shell: bash
+        run: |
+          set -euo pipefail
+          origin="${SUPABASE_URL%/}"
+          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --location --connect-timeout 10 --max-time 30 \
+            -X POST \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H 'Content-Type: application/json' \
+            --data '{}' \
+            "$origin/functions/v1/nexo-assistant")
+          echo "ASSISTANT_FUNCTION_HTTP=$status"
