@@ -1,0 +1,36 @@
+name: Run NEXO recovery migration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/run-nexo-recovery-migration.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply guarded additive migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=$(curl --silent --show-error --output "$RUNNER_TEMP/result.json" --write-out '%{http_code}' \
+            --max-time 120 -X POST \
+            'https://byuktfnrwgtjkpjkovai.supabase.co/functions/v1/nexo-recovery-migrate')
+          echo "MIGRATION_HTTP=$status"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          value=json.loads(Path(os.environ['RUNNER_TEMP'],'result.json').read_text())
+          print('MIGRATION_OK=' + str(bool(value.get('ok'))).lower())
+          print('ALREADY_MIGRATED=' + str(bool(value.get('alreadyMigrated'))).lower())
+          if value.get('result'):
+              print('RESULT=' + json.dumps(value['result'], sort_keys=True))
+          if value.get('error'):
+              print('ERROR=' + str(value['error']))
+          if not value.get('ok'):
+              raise SystemExit(1)
+          PY
