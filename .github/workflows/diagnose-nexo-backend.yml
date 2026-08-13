@@ -17,21 +17,27 @@ jobs:
     env:
       SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
       SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.NEXO_SUPABASE_PAT || secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
     steps:
-      - name: Validate client configuration
+      - name: Validate client configuration and secret coverage
         shell: bash
         run: |
           set -euo pipefail
           test -n "${SUPABASE_URL:-}" || { echo 'Missing VITE_SUPABASE_URL'; exit 1; }
           test -n "${SUPABASE_ANON_KEY:-}" || { echo 'Missing VITE_SUPABASE_ANON_KEY'; exit 1; }
           echo 'Client configuration present.'
+          for name in SUPABASE_SERVICE_ROLE_KEY SUPABASE_ACCESS_TOKEN SUPABASE_PROJECT_REF OPENROUTER_API_KEY; do
+            if [ -n "${!name:-}" ]; then echo "SECRET $name=PRESENT"; else echo "SECRET $name=MISSING"; fi
+          done
 
-      - name: Probe Supabase Auth and REST schema
+      - name: Probe Supabase Auth
         shell: bash
         run: |
           set -euo pipefail
           origin="${SUPABASE_URL%/}"
-
           auth_status=$(curl --silent --show-error --output "$RUNNER_TEMP/auth.json" --write-out '%{http_code}' \
             --location --connect-timeout 10 --max-time 30 \
             -H "apikey: $SUPABASE_ANON_KEY" \
@@ -41,35 +47,11 @@ jobs:
           python - <<'PY'
           import json, os
           from pathlib import Path
-          path = Path(os.environ['RUNNER_TEMP'], 'auth.json')
           try:
-              value = json.loads(path.read_text())
+              value = json.loads(Path(os.environ['RUNNER_TEMP'], 'auth.json').read_text())
           except Exception:
               value = {}
           print('AUTH_SETTINGS_JSON=' + ('ok' if isinstance(value, dict) and value else 'invalid'))
-          PY
-
-          rest_status=$(curl --silent --show-error --output "$RUNNER_TEMP/openapi.json" --write-out '%{http_code}' \
-            --location --connect-timeout 10 --max-time 30 \
-            -H "apikey: $SUPABASE_ANON_KEY" \
-            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
-            -H 'Accept: application/openapi+json' \
-            "$origin/rest/v1/")
-          echo "REST_OPENAPI_HTTP=$rest_status"
-          python - <<'PY'
-          import json, os
-          from pathlib import Path
-          expected_tables = ['admin_users','support_users','pairing_codes','devices','tickets','diagnostics','sessions','releases','device_entitlements','device_consents']
-          expected_rpcs = ['generate_pairing_code','generate_user_pairing_code','register_device']
-          try:
-              value = json.loads(Path(os.environ['RUNNER_TEMP'], 'openapi.json').read_text())
-              paths = set((value.get('paths') or {}).keys())
-          except Exception:
-              paths = set()
-          for name in expected_tables:
-              print(f'TABLE {name}: ' + ('present' if f'/{name}' in paths else 'missing'))
-          for name in expected_rpcs:
-              print(f'RPC {name}: ' + ('present' if f'/rpc/{name}' in paths else 'missing'))
           PY
 
       - name: Probe known tables without reading private rows
@@ -95,6 +77,35 @@ jobs:
             echo "TABLE_HTTP $table=$status${code:+ code=$code}"
           done
 
+      - name: Count rows with service role when available
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo 'SERVICE_ROLE_COUNTS=SKIPPED'
+            exit 0
+          fi
+          origin="${SUPABASE_URL%/}"
+          for table in admin_users support_users pairing_codes devices tickets diagnostics sessions releases device_entitlements device_consents; do
+            headers="$RUNNER_TEMP/$table.headers"
+            status=$(curl --silent --show-error --output /dev/null --dump-header "$headers" --write-out '%{http_code}' \
+              --location --connect-timeout 10 --max-time 30 \
+              -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+              -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+              -H 'Prefer: count=exact' \
+              -H 'Range: 0-0' \
+              "$origin/rest/v1/$table?select=*")
+            count=$(awk 'BEGIN{IGNORECASE=1} /^content-range:/ {gsub("\r",""); split($2,a,"/"); print a[2]}' "$headers" | tail -n 1)
+            echo "ROW_COUNT $table status=$status count=${count:-unknown}"
+          done
+
+          auth_admin_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --location --connect-timeout 10 --max-time 30 \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            "$origin/auth/v1/admin/users?page=1&per_page=1")
+          echo "AUTH_ADMIN_HTTP=$auth_admin_status"
+
       - name: Read public release metadata
         shell: bash
         run: |
@@ -113,6 +124,7 @@ jobs:
               value=json.loads(Path(os.environ['RUNNER_TEMP'],'releases.json').read_text())
           except Exception:
               value=[]
+          print('PUBLIC_RELEASE_ROWS=' + str(len(value) if isinstance(value,list) else 0))
           if isinstance(value,list):
               for row in value:
                   print('RELEASE ' + str({k: row.get(k) for k in ('version','published_at','is_active')}))
