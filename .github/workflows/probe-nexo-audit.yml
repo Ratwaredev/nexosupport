@@ -25,11 +25,17 @@ jobs:
           from pathlib import Path
           value=json.loads(Path(os.environ['RUNNER_TEMP'],'audit.json').read_text())
           env=value.get('env') or {}
+          print('RUNTIME_DB_URL=' + str(bool(env.get('dbUrl'))).lower())
           print('RUNTIME_SUPABASE_URL=' + str(bool(env.get('supabaseUrl'))).lower())
           print('RUNTIME_SERVICE_ROLE=' + str(bool(env.get('serviceRole'))).lower())
           print('RUNTIME_OPENROUTER=' + str(bool(env.get('openrouter'))).lower())
-          for table, info in (value.get('tables') or {}).items():
-              print(f"ROW_COUNT {table} status={info.get('status')} count={info.get('count')}")
-          auth=value.get('authUsers') or {}
-          print(f"AUTH_USERS status={auth.get('status')} total={auth.get('total')}")
+          for table, info in (value.get('counts') or {}).items():
+              if isinstance(info, dict):
+                  print(f"TABLE {table} exists={info.get('exists')} count={info.get('count')}")
+              else:
+                  print(f"TABLE {table} value={info}")
+          auth=value.get('authUsers')
+          print(f"AUTH_USERS total={auth}")
+          if value.get('dbError'):
+              print('DB_ERROR=' + str(value.get('dbError')))
           PY
