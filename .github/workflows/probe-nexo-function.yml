@@ -1,0 +1,39 @@
+name: Probe revived NEXO function
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/probe-nexo-function.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+    steps:
+      - name: Check function health
+        shell: bash
+        run: |
+          set -euo pipefail
+          origin="${SUPABASE_URL%/}"
+          status=$(curl --silent --show-error --output "$RUNNER_TEMP/health.json" --write-out '%{http_code}' \
+            --location --connect-timeout 10 --max-time 30 \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            "$origin/functions/v1/nexo-assistant")
+          echo "FUNCTION_HEALTH_HTTP=$status"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          try:
+              value=json.loads(Path(os.environ['RUNNER_TEMP'],'health.json').read_text())
+          except Exception:
+              value={}
+          print('FUNCTION_OK=' + str(bool(value.get('ok'))).lower())
+          print('FUNCTION_SERVICE=' + str(value.get('service','')))
+          PY
