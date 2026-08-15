@@ -1,0 +1,84 @@
+name: Publish clean Forge Studio v0.26 installer
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout build payload
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Reconstruct Forge Studio runtime
+        shell: pwsh
+        run: |
+          $parts = Get-ChildItem "forge-build/payload/part-*" | Sort-Object Name
+          if ($parts.Count -ne 15) { throw "Expected 15 payload files, found $($parts.Count)" }
+
+          $allText = New-Object System.Text.StringBuilder
+          foreach ($part in $parts) {
+            $raw = Get-Content $part.FullName -Raw
+            $clean = [regex]::Replace($raw, '[^A-Za-z0-9+/=]', '')
+            [void]$allText.Append($clean)
+          }
+
+          $payload = $allText.ToString()
+          $remainder = $payload.Length % 4
+          if ($remainder -ne 0) {
+            $payload += '=' * (4 - $remainder)
+          }
+          Write-Host "Sanitized payload length: $($payload.Length)"
+          [IO.File]::WriteAllBytes("forge-runtime.tar.xz", [Convert]::FromBase64String($payload))
+
+          New-Item -ItemType Directory -Force -Path forge-app | Out-Null
+          tar -xJf forge-runtime.tar.xz -C forge-app
+          if ($LASTEXITCODE -ne 0) { throw "Could not extract Forge runtime payload" }
+          $version = node -p "require('./forge-app/package.json').version"
+          if ($version -ne "0.26.0") { throw "Expected Forge Studio 0.26.0, got $version" }
+          Set-Content "forge-app/README.md" "# Forge Studio"
+          New-Item -ItemType Directory -Force -Path "forge-app/docs" | Out-Null
+          Set-Content "forge-app/docs/README.md" "# Forge Studio"
+
+      - name: Install desktop dependencies
+        working-directory: forge-app
+        run: npm install --no-audit --no-fund
+
+      - name: Validate packaged runtime
+        working-directory: forge-app
+        shell: pwsh
+        run: |
+          npm test
+          node --check desktop/main.cjs
+          node --check dist/server/index.js
+          node --check dist/agent/index.js
+
+      - name: Build standard NSIS installer and portable app
+        working-directory: forge-app
+        run: npx electron-builder --win nsis portable --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Upload clean Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Forge-Studio-v0.26.0-Windows-clean
+          path: |
+            forge-app/release/*.exe
+            forge-app/release/*.blockmap
+            forge-app/release/latest*.yml
+          if-no-files-found: error
+          retention-days: 7

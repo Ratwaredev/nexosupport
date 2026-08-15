@@ -1,0 +1,42 @@
+name: Fetch official Node runtime for Forge
+
+on:
+  push:
+    branches:
+      - forge-temp-installer-v026
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  node-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download official Windows Node runtime package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p node-runtime
+          cd node-runtime
+          npm pack node-win-x64@22.22.2
+          tar -xzf node-win-x64-22.22.2.tgz
+          node_path=$(find package -type f -iname node.exe -print -quit)
+          test -n "$node_path"
+          cp "$node_path" node.exe
+          sha256sum node.exe > SHA256SUMS.txt
+      - name: Upload official runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-node-runtime-v22.22.2
+          path: |
+            node-runtime/node.exe
+            node-runtime/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 1

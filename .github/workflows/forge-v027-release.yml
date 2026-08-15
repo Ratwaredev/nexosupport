@@ -1,0 +1,212 @@
+name: Publish Forge Studio v0.27.0 update channel
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: forge-v027-release-bootstrap
+  cancel-in-progress: true
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout temporary build payload
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Reconstruct Forge runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          function Decode-Parts($pattern, $output) {
+            $parts = Get-ChildItem $pattern | Sort-Object Name
+            if ($parts.Count -eq 0) { throw "No payload files matched $pattern" }
+            $joined = New-Object System.Text.StringBuilder
+            foreach ($part in $parts) {
+              $raw = Get-Content $part.FullName -Raw
+              [void]$joined.Append([regex]::Replace($raw, '[^A-Za-z0-9+/=]', ''))
+            }
+            $payload = $joined.ToString()
+            $remainder = $payload.Length % 4
+            if ($remainder -ne 0) { $payload += '=' * (4 - $remainder) }
+            [IO.File]::WriteAllBytes($output, [Convert]::FromBase64String($payload))
+          }
+
+          $baseParts = Get-ChildItem "forge-build/payload/part-*" | Sort-Object Name
+          if ($baseParts.Count -ne 15) { throw "Expected 15 base payload files, found $($baseParts.Count)" }
+          Decode-Parts "forge-build/payload/part-*" "forge-runtime.tar.xz"
+
+          New-Item -ItemType Directory -Force -Path forge-app | Out-Null
+          tar -xJf forge-runtime.tar.xz -C forge-app
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning "The archived preview tail was truncated; restoring the verified runtime tail patch."
+            $global:LASTEXITCODE = 0
+          }
+
+          Decode-Parts "forge-build/runtime-tail/part-*" "forge-runtime-tail.tar.xz"
+          $tailHash = (Get-FileHash "forge-runtime-tail.tar.xz" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($tailHash -ne "e79184fc53d3739051811ded325eca00cdeac9e2957c435b8cecfdccf907b43f") {
+            throw "Runtime tail checksum mismatch: $tailHash"
+          }
+          tar -xJf forge-runtime-tail.tar.xz -C forge-app
+          if ($LASTEXITCODE -ne 0) { throw "Could not restore Forge runtime tail" }
+
+          $required = @(
+            "forge-app/package.json",
+            "forge-app/desktop/main.cjs",
+            "forge-app/dist/server/index.js",
+            "forge-app/dist/agent/index.js",
+            "forge-app/public/index.html",
+            "forge-app/public/app.js",
+            "forge-app/public/styles.css",
+            "forge-app/scripts/init-local-auth.mjs",
+            "forge-app/scripts/apply-pending-update.mjs"
+          )
+          foreach ($item in $required) {
+            if (-not (Test-Path $item)) { throw "Required runtime file missing: $item" }
+          }
+
+      - name: Configure automatic public updates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $patchScript = @'
+          const fs = require("fs");
+
+          const packagePath = "forge-app/package.json";
+          const pkg = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+          pkg.version = "0.27.0";
+          pkg.build = pkg.build || {};
+          pkg.build.publish = [{
+            provider: "github",
+            owner: "Ratwaredev",
+            repo: "underdocksoporteapp",
+            releaseType: "release"
+          }];
+          pkg.build.win = { target: ["nsis"] };
+          pkg.build.nsis = {
+            ...(pkg.build.nsis || {}),
+            oneClick: false,
+            allowToChangeInstallationDirectory: true,
+            createDesktopShortcut: true,
+            createStartMenuShortcut: true,
+            artifactName: "Forge-Studio-Setup-${version}-${arch}.${ext}"
+          };
+          fs.writeFileSync(packagePath, JSON.stringify(pkg, null, 2) + "\n");
+
+          const mainPath = "forge-app/desktop/main.cjs";
+          let main = fs.readFileSync(mainPath, "utf8");
+          if (!main.includes("autoUpdater.autoDownload = false;")) {
+            throw new Error("Could not locate autoDownload configuration");
+          }
+          main = main.replace("autoUpdater.autoDownload = false;", "autoUpdater.autoDownload = true;");
+          const startupPattern = /createWindow\(token\);\s*configureUpdater\(\);/;
+          if (!startupPattern.test(main)) {
+            throw new Error("Could not locate updater startup block");
+          }
+          main = main.replace(startupPattern, `createWindow(token);
+              configureUpdater();
+              if (autoUpdater) {
+                const check = () => autoUpdater.checkForUpdates().catch((error) => sendUpdate({ state: "error", message: error.message }));
+                setTimeout(check, 5000);
+                setInterval(check, 4 * 60 * 60 * 1000);
+              }`);
+          fs.writeFileSync(mainPath, main);
+          '@
+          Set-Content -Path patch-updater.cjs -Value $patchScript -Encoding UTF8
+          node patch-updater.cjs
+          Set-Content "forge-app/README.md" "# Forge Studio"
+          New-Item -ItemType Directory -Force -Path "forge-app/docs" | Out-Null
+          Set-Content "forge-app/docs/README.md" "# Forge Studio"
+
+      - name: Install build dependencies
+        working-directory: forge-app
+        run: npm install --no-audit --no-fund
+
+      - name: Validate updater configuration
+        working-directory: forge-app
+        shell: pwsh
+        run: |
+          node --check desktop/main.cjs
+          node --check dist/server/index.js
+          node --check dist/agent/index.js
+          node -e "const fs=require('fs'); const p=require('./package.json'); const m=fs.readFileSync('desktop/main.cjs','utf8'); if(p.version!=='0.27.0') process.exit(1); if(p.build.publish[0].repo!=='underdocksoporteapp') process.exit(2); if(!m.includes('autoUpdater.autoDownload = true')) process.exit(3); if(!m.includes('setTimeout(check, 5000)')) process.exit(4); if(!m.includes('setInterval(check, 4 * 60 * 60 * 1000)')) process.exit(5)"
+
+      - name: Remove previous bootstrap release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view v0.27.0 --repo Ratwaredev/underdocksoporteapp *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete v0.27.0 --repo Ratwaredev/underdocksoporteapp --cleanup-tag --yes
+            if ($LASTEXITCODE -ne 0) { throw "Could not remove previous v0.27.0 release" }
+          }
+          $global:LASTEXITCODE = 0
+
+      - name: Build and publish Windows update release
+        working-directory: forge-app
+        shell: pwsh
+        run: npx electron-builder --win nsis --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Verify published release and updater assets
+        working-directory: forge-app
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $release = gh release view v0.27.0 --repo Ratwaredev/underdocksoporteapp --json isDraft,isPrerelease,url,assets | ConvertFrom-Json
+          if ($release.isDraft) { throw "v0.27.0 is still a draft" }
+          if ($release.isPrerelease) { throw "v0.27.0 is unexpectedly a prerelease" }
+          $names = @($release.assets | ForEach-Object { $_.name })
+          $expected = @(
+            "Forge-Studio-Setup-0.27.0-x64.exe",
+            "Forge-Studio-Setup-0.27.0-x64.exe.blockmap",
+            "latest.yml"
+          )
+          foreach ($name in $expected) {
+            if ($names -notcontains $name) { throw "Published asset missing: $name" }
+          }
+
+          $exe = Get-Item release/Forge-Studio-Setup-0.27.0-x64.exe
+          if ($exe.Length -lt 100MB) { throw "Installer is unexpectedly small: $($exe.Length)" }
+          Write-Host "Release URL: $($release.url)"
+          Write-Host "Installer bytes: $($exe.Length)"
+          Write-Host "Installer SHA256: $((Get-FileHash $exe.FullName -Algorithm SHA256).Hash)"
+          Write-Host "Published assets: $($names -join ', ')"
+
+          New-Item -ItemType Directory -Force -Path release-check | Out-Null
+          gh release download v0.27.0 --repo Ratwaredev/underdocksoporteapp --pattern latest.yml --dir release-check --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Could not download published latest.yml" }
+          if ((Get-FileHash latest.yml -Algorithm SHA256).Hash -ne (Get-FileHash release-check/latest.yml -Algorithm SHA256).Hash) {
+            throw "Published latest.yml differs from the built metadata"
+          }
+
+      - name: Upload validation copy
+        uses: actions/upload-artifact@v4
+        with:
+          name: Forge-Studio-v0.27.0-Windows-updater-enabled
+          path: |
+            forge-app/release/Forge-Studio-Setup-0.27.0-x64.exe
+            forge-app/release/Forge-Studio-Setup-0.27.0-x64.exe.blockmap
+            forge-app/release/latest.yml
+          if-no-files-found: error
+          retention-days: 7

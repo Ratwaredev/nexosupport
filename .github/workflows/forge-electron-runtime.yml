@@ -1,0 +1,33 @@
+name: Fetch official Electron runtime for Forge
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  electron-runtime:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download official Electron runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $url = "https://github.com/electron/electron/releases/download/v43.2.0/electron-v43.2.0-win32-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile electron.zip
+          New-Item -ItemType Directory -Force -Path electron-runtime | Out-Null
+          Expand-Archive -Path electron.zip -DestinationPath electron-runtime -Force
+          if (-not (Test-Path "electron-runtime/electron.exe")) { throw "electron.exe missing from official archive" }
+          $hash = (Get-FileHash "electron-runtime/electron.exe" -Algorithm SHA256).Hash.ToLower()
+          "$hash  electron.exe" | Set-Content "electron-runtime/SHA256SUMS.txt"
+      - name: Upload official Electron runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-electron-runtime-v43.2.0-win-x64
+          path: electron-runtime
+          if-no-files-found: error
+          retention-days: 1

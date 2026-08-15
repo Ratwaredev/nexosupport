@@ -1,0 +1,34 @@
+name: Fetch Forge updater runtime
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  updater-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install electron-updater production dependency tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir updater-runtime
+          cd updater-runtime
+          npm init -y >/dev/null
+          npm install electron-updater@6.8.9 --omit=dev --no-audit --no-fund
+          node -e "const p=require('./node_modules/electron-updater/package.json'); if(p.version!=='6.8.9') process.exit(1)"
+      - name: Upload updater runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-electron-updater-v6.8.9
+          path: updater-runtime/node_modules
+          if-no-files-found: error
+          retention-days: 1

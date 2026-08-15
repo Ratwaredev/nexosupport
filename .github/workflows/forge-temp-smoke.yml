@@ -1,0 +1,33 @@
+name: Forge private checkout check
+
+on:
+  push:
+    branches:
+      - forge-temp-installer-v026
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  checkout-private:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout temporary builder branch
+        uses: actions/checkout@v4
+
+      - name: Checkout private Forge source
+        uses: actions/checkout@v4
+        with:
+          repository: Ratwaredev/ratlab
+          ref: agent/build-v026-installer
+          token: ${{ github.token }}
+          path: forge-private
+
+      - name: Verify private checkout
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "forge-private/package.json")) { throw "Private checkout unavailable" }
+          Write-Output "Private Forge checkout available"

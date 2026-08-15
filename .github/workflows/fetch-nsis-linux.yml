@@ -1,0 +1,30 @@
+name: Fetch NSIS Linux compiler
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  nsis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install official Debian NSIS package
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends nsis
+          makensis -VERSION
+          mkdir -p nsis-tool/usr/bin nsis-tool/usr/share
+          cp /usr/bin/makensis nsis-tool/usr/bin/
+          cp -a /usr/share/nsis nsis-tool/usr/share/
+          tar -czf nsis-linux-toolchain.tar.gz -C nsis-tool .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nsis-linux-toolchain
+          path: nsis-linux-toolchain.tar.gz
+          if-no-files-found: error
+          retention-days: 1
