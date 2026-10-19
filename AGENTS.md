@@ -84,3 +84,11 @@ GitHub Actions must additionally build the NSIS installer, install it and verify
 6. Verify `latest.json`, signature and installer bytes.
 
 The release workflow intentionally blocks if step 3 or 4 is not ready.
+
+## Incidentes de producción (para Codex y Claude)
+- Fuente de verdad antes de escribir: repo/HEAD, entorno, URL canónica, deployment vigente, rollback. Commit ≠ build ≠ READY ≠ alias ≠ HTTP real.
+- Mantenimiento urgente: activar standby estático PREPARADO y verificado mediante alias/ruteo, sin reconstruir toda la app ni alterar su entrypoint. Si no existe, crear uno aislado y probar antes de conmutar.
+- Verificar HTTP del dominio en portada/login/rutas profundas/de cliente; API, escrituras, PWA y sesiones existentes requieren verificación independiente.
+- No anunciar «hecho», «para todos» ni «producción» sin pruebas actuales. Reportar etapas, IDs/SHAs y huecos observables.
+- Cuidar concurrencia, no restaurar archivos viejos sobre HEAD ni cambiar políticas de auto-deploy para un aviso. El cambio mínimo debe poder revertirse.
+- Producción, datos, migraciones y secretos sólo con orden explícita. Reforzar con smoke tests técnicos; este documento no garantiza cumplimiento por sí solo.
